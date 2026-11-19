@@ -1122,8 +1122,8 @@ export function FinancePage() {
           the single global project selector is the one source of truth, so
           there is no duplicate amber banner here (audit: finance-top). */}
 
-      {/* Summary Cards */}
-      {projectId && (
+      {/* The cost-control report presents original currencies and its own forecast. */}
+      {projectId && activeTab !== 'cost_control' && (
         <FinanceSummaryCards
           projectId={projectId}
           onGoToBudgets={() => setActiveTab('budgets')}

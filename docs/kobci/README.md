@@ -123,7 +123,7 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python -m pytest tests/integration/test_finance_project_cost_position.py tests/unit/test_finance_cost_position.py -q
 cd ../frontend
 npm ci
-npm test -- --run src/features/finance/__tests__/ProjectCostReport.test.tsx src/features/finance/__tests__/financeCostPositionCards.test.tsx src/features/finance/__tests__/tabFromUrl.test.tsx
+npm test -- --run src/features/finance/__tests__/ProjectCostReport.test.tsx src/features/finance/__tests__/financeCostPositionCards.test.tsx src/features/finance/__tests__/tabFromUrl.test.tsx src/features/boq/__tests__/lockedBillPageIsReadOnly.test.tsx
 npm run typecheck
 ```
 
@@ -135,8 +135,9 @@ npm run typecheck
 | Project finance HTTP scenarios on disposable PostgreSQL, including USD, SL SH, historical FX, permissions and two separate companies | 16 passed |
 | FX conversion/validation, inventory, field-time payroll export, schedule progress/CPM, booking export and three BOQ import routes | 97 passed |
 | Contract PDF/Excel output, legal-entity visibility, payroll rules and FX policy access | 78 passed |
-| Finance tab navigation, existing dashboard cards and bilingual cost report | 16 Vitest checks passed |
+| Finance tab navigation, existing dashboard cards, bilingual cost report and locked BOQ editor | 18 Vitest checks passed |
 | Responsive report | Chromium rendered both languages at 360, 768 and 1,280 pixels. The browser layout check used a demonstration API response. |
+| TypeScript | The modified Finance and project-setup paths passed a scoped typecheck. The repository-wide compiler exceeded the available memory on two attempts. |
 | Local deployment configuration | Compose configuration validated with loopback binding. Windows installer and production deployment remain pending. |
 
 The scope of the tests is recorded here so an operator can distinguish a working pilot from a commercial release. Tests used isolated Linux QA infrastructure. PDF and Excel checks exercised the existing contract exports. The new cost report currently renders in the application.
