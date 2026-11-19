@@ -82,19 +82,18 @@ CONTINGENCY_CATEGORY = "contingency"
 CONTINGENCY_DRAWDOWN_PREFIX = "contingency_drawdown:"
 
 
-def _without_drawdowns(metadata: object) -> dict[str, Any]:
-    """Caller-supplied budget metadata minus any contingency drawdown keys.
+def _is_budget_provenance(key: str) -> bool:
+    """Fields written by BOQ approval, document reconciliation and authorized drawdowns."""
+    return key in {"boq_id", "budget_sync", "actual_from_receipts"} or key.startswith((
+        CONTINGENCY_DRAWDOWN_PREFIX, "from_boq:", "boq_fx:", "sync:", "committed_from_po:",
+        "received_from_gr:", "released_by_payment:",
+    ))
 
-    A drawdown is money a manager confirmed (``risk.contingency``). The budget
-    create and edit routes need only ``finance.create`` / ``finance.update``,
-    so a key with the drawdown prefix arriving through them would let an
-    editor book a drawdown in a manager's name. Such keys are dropped on the
-    way in, whatever the line's category, so a line created under another
-    category and moved to contingency later cannot carry one either.
-    """
+
+def _editable_budget_metadata(metadata: object) -> dict[str, Any]:
     if not isinstance(metadata, dict):
         return {}
-    return {k: v for k, v in metadata.items() if not str(k).startswith(CONTINGENCY_DRAWDOWN_PREFIX)}
+    return {k: v for k, v in metadata.items() if not _is_budget_provenance(k)}
 
 
 # Upper bound on invoices scanned for the retention ledger (mirrors the invoice
@@ -205,10 +204,9 @@ def _convert_to_base(
         value = _safe_decimal(amount)
         if norm and norm != base:
             fx = fx_rates_map.get(norm)
-            if fx:
-                rate = _safe_decimal(fx, Decimal("1"))
-                if rate > 0:
-                    value = value * rate
+            rate = _safe_decimal(fx)
+            if rate.is_finite() and rate > 0:
+                value *= rate
             elif norm not in missing:
                 missing.append(norm)
         total += value
@@ -2603,7 +2601,7 @@ class FinanceService:
             forecast_final=data.forecast_final,
             # A new row holds only what was typed onto it; it never carried the
             # old paid-invoice recompute (see ``sync_project_budget``).
-            metadata_={**_without_drawdowns(data.metadata), "budget_sync": "1"},
+            metadata_={**_editable_budget_metadata(data.metadata), "budget_sync": "1"},
         )
         try:
             budget = await self.budgets.create(budget)
@@ -2644,17 +2642,11 @@ class FinanceService:
 
         * Only priced leaves count. A section row carries the subtotal of its
           children, and summing it as well would count the bill twice.
-        * Rows are keyed ``(wbs_id, category="estimate")``, the category that
-          marks them as generated. Each row records what every bill put into
-          it under ``from_boq:<boq_id>``, so locking the same bill again
-          replaces that bill's share instead of adding it twice, and a second
-          bill on the same WBS adds to the first rather than overwriting it.
-        * A change in the original budget moves the revised budget by the same
-          amount, so revisions already booked against the row survive.
-        * A bill that already has a budget from the "Create Budget" button of
-          18.0 and earlier (rows stamped ``boq_id`` in their metadata) keeps
-          that budget and gets no second one. Those rows may carry revisions
-          and synced figures, so they are neither converted nor replaced.
+        * The first approved allocation of each original bill is frozen. A
+          later revision goes through change control. Independent original
+          bills add their own share to a common WBS.
+        * Existing locked allocations (including legacy rows) survive
+          replay and changes to prices or exchange rates.
 
         This is the only writer of a bill's finance budget: the lock reaches it
         through ``costmodel.budget.generated`` and the "Create Budget" endpoint
@@ -2671,48 +2663,68 @@ class FinanceService:
             The bill's budget rows: created or updated, or the earlier rows
             left as they were.
         """
-        from app.modules.boq.models import Position
-
-        earlier = list(
-            (
-                await self.session.execute(
-                    select(ProjectBudget).where(
-                        ProjectBudget.project_id == project_id,
-                        ProjectBudget.metadata_["boq_id"].as_string() == str(boq_id),
-                    )
-                )
-            )
-            .scalars()
-            .all()
+        from app.modules.boq.gaeb_common import is_excluded_from_total
+        from app.modules.boq.models import BOQ, Position
+        from app.modules.boq.service import (
+            _leaf_total_base_with_resources,
+            _position_currency,
+            resource_fx_factor,
         )
-        if earlier:
-            logger.info(
-                "Budget for BOQ %s already created by the earlier endpoint (project=%s rows=%d); not seeding again",
-                boq_id,
-                project_id,
-                len(earlier),
-            )
-            return earlier
+        from app.modules.projects.models import Project
 
-        rows = (
-            await self.session.execute(
-                select(Position.id, Position.parent_id, Position.wbs_id, Position.total).where(
-                    Position.boq_id == boq_id
-                )
-            )
-        ).all()
-        parents = {parent_id for _, parent_id, _, _ in rows if parent_id is not None}
-        by_wbs: dict[str | None, Decimal] = {}
-        for pos_id, _, wbs_id, total in rows:
-            if pos_id in parents:
-                continue
-            key = (wbs_id or "").strip() or None
-            by_wbs[key] = by_wbs.get(key, Decimal("0")) + _safe_decimal(total)
-        if not by_wbs:
+        # Serialize all bills entering one project's budget, including two
+        # different bills which create a shared WBS row for the first time.
+        project = (await self.session.execute(
+            select(Project).where(Project.id == project_id).with_for_update(of=Project)
+        )).scalar_one()
+        bill = (await self.session.execute(
+            select(BOQ).where(BOQ.id == boq_id, BOQ.project_id == project_id)
+        )).scalar_one()
+        if not bill.is_locked or bill.parent_estimate_id or bill.variation_request_id:
+            # Scenarios, revisions and variation bills price changes to scope.
+            # Their full value would duplicate the original bill.
             return []
 
-        currency_code = await self._project_currency(project_id)
         marker = f"from_boq:{boq_id}"
+        existing = list((await self.session.scalars(
+            select(ProjectBudget).where(
+                ProjectBudget.project_id == project_id,
+                (ProjectBudget.metadata_["boq_id"].as_string() == str(boq_id))
+                | ProjectBudget.metadata_[marker].as_string().is_not(None),
+            )
+        )).all())
+        if existing:
+            return existing
+
+        positions = list((await self.session.scalars(select(Position).where(Position.boq_id == boq_id))).all())
+        parents = {p.parent_id for p in positions if p.parent_id}
+        currency_code = (project.currency or "").strip().upper()
+        rates = _project_fx_map(project)
+        used_rates: dict[str, str] = {}
+        by_wbs: dict[str | None, Decimal] = {}
+        for pos in positions:
+            if pos.id in parents or is_excluded_from_total(pos):
+                continue
+            resource_rows = (pos.metadata_ or {}).get("resources")
+            missing: set[str] = set()
+            codes = {_position_currency(pos)} | {
+                str(r.get("currency") or "").strip().upper()
+                for r in (resource_rows if isinstance(resource_rows, list) else []) if isinstance(r, dict)
+            }
+            for code in codes - {"", currency_code}:
+                rate = _safe_decimal(rates.get(code))
+                if not currency_code or not rate.is_finite() or rate <= 0 or resource_fx_factor(code, currency_code, rates) is None:
+                    missing.add(code)
+                else:
+                    used_rates[code] = rates[code]
+            if missing:
+                raise HTTPException(409, detail=f"Set the project currency and positive exchange rates for {', '.join(sorted(missing))} before budgeting.")
+            key = (pos.wbs_id or "").strip() or None
+            by_wbs[key] = by_wbs.get(key, Decimal(0)) + _leaf_total_base_with_resources(pos, rates, currency_code)
+        evidence = {
+            "base_currency": currency_code, "base_units_per_foreign_unit": used_rates,
+            "source": "project.fx_rates", "approved_at": bill.approved_at, "approved_by": bill.approved_by,
+        }
         touched: list[ProjectBudget] = []
         # Create the rows in WBS order. The positions come back in whatever
         # order the table holds them, and the row created first is the one a
@@ -2733,16 +2745,17 @@ class FinanceService:
                     currency_code=currency_code,
                     original_budget=amount,
                     revised_budget=amount,
-                    metadata_={marker: str(amount), "budget_sync": "1"},
+                    metadata_={marker: str(amount), f"boq_fx:{boq_id}": evidence, "budget_sync": "1"},
                 )
                 self.session.add(budget)
             else:
+                if (budget.currency_code or "").strip().upper() != currency_code:
+                    raise HTTPException(409, detail="The approved budget line uses a different project currency.")
                 md = dict(budget.metadata_ or {})
-                previous = _safe_decimal(md.get(marker))
+                md[f"boq_fx:{boq_id}"] = evidence
                 md[marker] = str(amount)
-                delta = amount - previous
-                budget.original_budget = _safe_decimal(budget.original_budget) + delta
-                budget.revised_budget = _safe_decimal(budget.revised_budget) + delta
+                budget.original_budget = _safe_decimal(budget.original_budget) + amount
+                budget.revised_budget = _safe_decimal(budget.revised_budget) + amount
                 budget.metadata_ = md
             touched.append(budget)
         await self.session.flush()
@@ -2826,11 +2839,18 @@ class FinanceService:
 
         fields = data.model_dump(exclude_unset=True)
         stored_md = dict(getattr(current, "metadata_", None) or {})
+        if "boq_id" in stored_md or any(k.startswith("from_boq:") for k in stored_md):
+            for key in {"original_budget", "revised_budget", "wbs_id", "category", "currency_code"} & fields.keys():
+                value = fields[key]
+                if key in {"original_budget", "revised_budget"} and value is not None:
+                    value = Decimal(value)
+                if value != getattr(current, key):
+                    raise HTTPException(409, detail="This line belongs to an approved BOQ. Use a change order.")
         stored_drawdowns = {k: v for k, v in stored_md.items() if k.startswith(CONTINGENCY_DRAWDOWN_PREFIX)}
         if "metadata" in fields:
             incoming = fields.pop("metadata")
-            merged = _without_drawdowns(incoming)
-            merged.update(stored_drawdowns)
+            merged = _editable_budget_metadata(incoming)
+            merged.update({k: v for k, v in stored_md.items() if _is_budget_provenance(k)})
             # An explicit null on a line without drawdowns still clears it, as before.
             fields["metadata_"] = merged if (merged or incoming is not None) else None
         if (

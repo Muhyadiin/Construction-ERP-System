@@ -90,6 +90,7 @@ from app.modules.finance.einvoice_settings_schemas import (
 )
 from app.modules.finance.einvoice_tr_schemas import TrEInvoiceFields
 from app.modules.finance.models import EVMSnapshot, Invoice, InvoiceLineItem, Payment, ProjectBudget
+from app.modules.finance.project_cost_report import ProjectCostReport, project_cost_report
 from app.modules.finance.retention_ledger import RetentionRollup
 from app.modules.finance.schemas import (
     AccountStatementLineResponse,
@@ -2564,6 +2565,19 @@ async def create_evm_snapshot(
 
 
 # ── Finance Dashboard ─────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/project-cost-report/",
+    response_model=ProjectCostReport,
+    summary="Reconcile project costs, forecasts and signed contract value by currency",
+    dependencies=[Depends(RequirePermission("finance.read")), Depends(RequirePermission("contracts.read"))],
+)
+async def read_project_cost_report(
+    project_id: uuid.UUID, session: SessionDep, user_id: CurrentUserId,
+) -> ProjectCostReport:
+    await _require_project_access(session, project_id, user_id)
+    return await project_cost_report(session, project_id)
 
 
 @router.get(

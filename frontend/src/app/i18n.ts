@@ -287,6 +287,7 @@ export const useTranslation = useI18nTranslation;
 // locale lives in its own per-language chunk and is fetched on demand —
 // see ``loadLocaleResource`` below.
 import enResource from './locales/en';
+import { costReportEnglish, costReportSomali } from '../features/finance/costReportLocale';
 
 // Module translations applied at runtime
 const moduleTranslations: Record<string, Record<string, Record<string, string>>> = {};
@@ -579,7 +580,7 @@ i18n
     // lazy-loaded by ``loadLocaleResource`` below. ``fallbackLng: 'en'``
     // means missing keys (e.g. while the locale chunk is still in
     // flight) render in English instead of as raw key strings.
-    resources: { en: enResource },
+    resources: { en: { ...enResource, costReport: costReportEnglish }, so: { costReport: costReportSomali } },
     lng: initialLanguage,
     // The regional variants fall back to their own language before English, so
     // a key not localised for Chile shows Spanish rather than English. That is
