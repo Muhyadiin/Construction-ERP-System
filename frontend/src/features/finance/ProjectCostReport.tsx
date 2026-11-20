@@ -40,7 +40,7 @@ export function ProjectCostReport({ projectId }: { projectId: string }) {
   const { t } = useTranslation('costReport', { lng: language });
   const { data, isError, refetch } = useQuery({
     queryKey: ['finance', 'project-cost-report', projectId],
-    queryFn: () => apiGet<Report>('/v1/finance/project-cost-report/?project_id=' + encodeURIComponent(projectId)),
+    queryFn: () => apiGet<Report>(`/v1/finance/project-cost-report/?project_id=${encodeURIComponent(projectId)}`),
   });
   const formatter = new Intl.NumberFormat(language, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
   function figure(key: string, value: Amount, unit = '') {

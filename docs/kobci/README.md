@@ -138,9 +138,13 @@ npm run typecheck
 | Finance tab navigation, existing dashboard cards, bilingual cost report and locked BOQ editor | 18 Vitest checks passed |
 | Responsive report | Chromium rendered both languages at 360, 768 and 1,280 pixels. The browser layout check used a demonstration API response. |
 | TypeScript | The modified Finance and project-setup paths passed a scoped typecheck. The repository-wide compiler exceeded the available memory on two attempts. |
+| Authentication and access | The initial 138 authentication and project-finance checks passed. An additional 169 tests covered company permissions, sessions, portals and exports. The final authentication rerun passed 103 checks, including three additional OIDC key-policy cases. |
+| Related workflows | 114 tests passed for critical workflows, tasks and cost calculations. All 25 contingency tests passed, including retention of cost-reconciliation markers when a user clears budget notes. |
+| Backup and recovery | 37 tests passed for exports, file handling, transfer between accounts and scoped restore using isolated test data. A representative full-machine disaster-recovery exercise remains open. |
+| Desktop packaging | All 23 workflow and packaging unit tests passed locally. Windows acceptance is tracked by the diagnostic build on the review branch. |
 | Local deployment configuration | Compose configuration validated with loopback binding. Windows installer and production deployment remain pending. |
 
-The scope of the tests is recorded here so an operator can distinguish a working pilot from a commercial release. Tests used isolated Linux QA infrastructure. PDF and Excel checks exercised the existing contract exports. The new cost report currently renders in the application.
+The fork starts from a source snapshot. Six inherited regression checks compare generated PDFs and translation catalogues with Git revisions that predate that snapshot. They require the upstream history to supply their comparison inputs. Tests used isolated Linux QA infrastructure. PDF and Excel checks exercised the existing contract exports. The new cost report currently renders in the application.
 
 ## Security, dependencies and licence
 

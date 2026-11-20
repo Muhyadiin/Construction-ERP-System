@@ -503,16 +503,16 @@ async def test_a_line_with_drawdowns_keeps_its_category(session):
 
 
 @pytest.mark.asyncio
-async def test_null_metadata_clears_a_plain_line_but_keeps_a_drawdown(session):
+async def test_null_metadata_clears_user_notes_but_keeps_sync_and_drawdown_markers(session):
     svc = RiskService(session)
     fin = FinanceService(session)
     plain = await _line(session, amount="100", category="material", wbs="M-1")
     await fin.update_budget(plain, BudgetUpdate(metadata={"notes": "x"}))
-    # An explicit null still clears the metadata of a line that holds no drawdown.
+    # A null removes the notes. The migration marker still protects reconciled costs.
     await fin.update_budget(plain, BudgetUpdate(metadata=None))
     b = await fin.get_budget(plain)
     await session.refresh(b)
-    assert not b.metadata_
+    assert b.metadata_ == {"budget_sync": "1"}
 
     line = await _line(session, amount="5000")
     rid = await _risk(svc, status="occurred")

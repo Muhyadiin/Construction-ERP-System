@@ -137902,6 +137902,7 @@
         "pdf_translations.py",
         "permissions.py",
         "po_link.py",
+        "project_cost_report.py",
         "repairs.py",
         "repository.py",
         "retention_ledger.py",
@@ -138790,6 +138791,12 @@
           "handler": "create_evm_snapshot",
           "response_model": "EVMSnapshotResponse",
           "request_schema": "EVMSnapshotCreate"
+        },
+        {
+          "method": "GET",
+          "path": "/project-cost-report/",
+          "handler": "read_project_cost_report",
+          "response_model": "ProjectCostReport"
         },
         {
           "method": "GET",
@@ -323280,10 +323287,10 @@
     },
     {
       "name": "finance",
-      "ts_files": 59,
+      "ts_files": 62,
       "css_files": 0,
-      "test_files": 25,
-      "total_files": 59
+      "test_files": 26,
+      "total_files": 62
     },
     {
       "name": "forms",
@@ -326172,11 +326179,11 @@
     "total_models": 925,
     "total_columns": 10851,
     "total_relationships": 261,
-    "total_routes": 5323,
+    "total_routes": 5324,
     "total_schemas": 4864,
-    "total_python_files": 3471,
+    "total_python_files": 3472,
     "frontend_features": 243,
-    "frontend_ts_files": 4289,
+    "frontend_ts_files": 4292,
     "frontend_backend_mapped": 218
   },
   "frontend_backend_mapping": {

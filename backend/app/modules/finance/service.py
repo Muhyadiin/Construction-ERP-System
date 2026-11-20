@@ -2874,7 +2874,7 @@ class FinanceService:
             incoming = fields.pop("metadata")
             merged = _editable_budget_metadata(incoming)
             merged.update({k: v for k, v in stored_md.items() if _is_budget_provenance(k)})
-            # An explicit null on a line without drawdowns still clears it, as before.
+            # An explicit null clears user metadata while retaining server-owned accounting markers.
             fields["metadata_"] = merged if (merged or incoming is not None) else None
         if (
             stored_drawdowns
