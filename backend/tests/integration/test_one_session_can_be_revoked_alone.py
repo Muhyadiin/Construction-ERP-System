@@ -328,9 +328,9 @@ def test_a_session_that_is_not_on_file_is_honoured_and_says_so(
 
 def _unverified(token: str) -> dict:
     """Claims of a token this test process just minted, read without verifying."""
-    from jose import jwt
+    import jwt
 
-    return jwt.get_unverified_claims(token)
+    return jwt.decode(token, options={"verify_signature": False})
 
 
 def test_every_token_pair_is_minted_inside_the_session_helper() -> None:

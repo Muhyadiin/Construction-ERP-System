@@ -76,7 +76,7 @@ def _auth(token: str) -> dict[str, str]:
 
 
 def _expired_token(user_id: str) -> str:
-    from jose import jwt
+    import jwt
 
     settings = get_settings()
     return jwt.encode(

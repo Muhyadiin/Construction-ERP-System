@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Artem Boiko / DataDrivenConstruction
 """​‌‍⁠​‌‍⁠​‌‍⁠​‌‍⁠Symmetric encryption for at-rest secrets (API keys, OAuth tokens).
 
-Uses Fernet (cryptography lib, already in deps via python-jose). The key
+Uses Fernet (cryptography lib, already in deps via PyJWT[crypto]). The key
 is derived from settings.jwt_secret + a fixed app salt so existing
 deployments do not need a new env var. New values are always encrypted
 with the current JWT_SECRET; decryption also tries every secret listed in

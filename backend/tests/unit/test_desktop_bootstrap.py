@@ -124,7 +124,7 @@ async def test_bootstrap_creates_admin_owner_and_returns_tokens(session: AsyncSe
     assert (owner.metadata_ or {}).get("local_desktop") is True
 
     # The minted access token carries the owner's identity.
-    from jose import jwt
+    import jwt
 
     from app.config import get_settings
 

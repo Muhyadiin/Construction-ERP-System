@@ -10,12 +10,13 @@ import json
 import time
 import uuid
 
+import jwt
 import pytest
 import pytest_asyncio
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
-from jose import jwk, jwt
+from jwt.algorithms import RSAAlgorithm
 
 from app.modules.users import oidc
 
@@ -32,8 +33,7 @@ DISCOVERY = {
 def _key_pair(kid: str):
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
-    pub = key.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
-    public_jwk = jwk.construct(pub, "RS256").to_dict()
+    public_jwk = RSAAlgorithm.to_jwk(key.public_key(), as_dict=True)
     public_jwk.update({"kid": kid, "use": "sig", "alg": "RS256"})
     return pem, public_jwk
 
@@ -105,6 +105,15 @@ async def test_valid_id_token_is_accepted(provider):
 async def test_bad_claims_are_rejected(provider, overrides):
     with pytest.raises(HTTPException) as exc:
         await _verify(_token(**overrides))
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metadata", [{"use": "enc"}, {"key_ops": ["sign"]}, {"alg": "RS512"}])
+async def test_provider_key_must_be_authorized_for_token_verification(provider, metadata):
+    provider[:] = [dict(PUBLIC_JWK, **metadata)]
+    with pytest.raises(HTTPException) as exc:
+        await _verify(_token())
     assert exc.value.status_code == 401
 
 

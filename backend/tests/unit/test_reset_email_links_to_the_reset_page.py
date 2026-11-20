@@ -24,8 +24,8 @@ from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+import jwt
 import pytest
-from jose import jwt
 
 # The route App.tsx mounts ResetPasswordPage on.
 FRONTEND_RESET_ROUTE = "/auth/reset"

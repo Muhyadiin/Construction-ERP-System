@@ -120,11 +120,12 @@ def verify_jwt(token: str | None, secret: str) -> bool:
     if not token:
         return False
     try:
-        from jose import JWTError, jwt
+        import jwt
+        from jwt import InvalidTokenError
 
         jwt.decode(token, secret, algorithms=["HS256"])
         return True
-    except (JWTError, Exception):  # noqa: BLE001
+    except (InvalidTokenError, Exception):  # noqa: BLE001
         return False
 
 

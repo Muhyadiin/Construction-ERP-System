@@ -80,6 +80,18 @@ def _is_admin(payload: dict) -> bool:
     return role is not None and admin is not None and ROLE_HIERARCHY.get(role, -1) >= ROLE_HIERARCHY.get(admin, 999)
 
 
+async def _directory_scope(service: LegalEntityService, payload: dict) -> set[uuid.UUID] | None:
+    """A platform administrator sees all companies. Everyone else sees their memberships."""
+    if _is_admin(payload):
+        return None
+    return set(await service.my_entity_ids(uuid.UUID(payload["sub"])))
+
+
+def _require_directory_access(entity_id: uuid.UUID, scope: set[uuid.UUID] | None) -> None:
+    if scope is not None and entity_id not in scope:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Legal entity not found")
+
+
 async def _entity_response(
     service: LegalEntityService,
     entity: LegalEntity,
@@ -109,11 +121,12 @@ def _branch_response(branch: Branch, warnings: list[Issue]) -> BranchResponse:
 @router.get("/entities/", response_model=LegalEntityListResponse)
 async def list_entities(
     session: SessionDep,
-    _user_id: CurrentUserId,
+    payload: CurrentUserPayload,
     include_inactive: bool = Query(default=False),
 ) -> LegalEntityListResponse:
     service = LegalEntityService(session)
-    items = await service.list_entities(include_inactive=include_inactive)
+    scope = await _directory_scope(service, payload)
+    items = await service.list_entities(include_inactive=include_inactive, entity_ids=scope)
     projects, members, settings = (
         await service.project_counts(),
         await service.member_counts(),
@@ -127,27 +140,28 @@ async def list_entities(
 
 
 @router.get("/entities/default", response_model=LegalEntityResponse | None)
-async def get_default_entity(session: SessionDep, _user_id: CurrentUserId) -> LegalEntityResponse | None:
+async def get_default_entity(session: SessionDep, payload: CurrentUserPayload) -> LegalEntityResponse | None:
     service = LegalEntityService(session)
     entity = await service.default_entity()
-    return await _entity_response(service, entity) if entity is not None else None
+    scope = await _directory_scope(service, payload)
+    if entity is None or (scope is not None and entity.id not in scope):
+        return None
+    return await _entity_response(service, entity)
 
 
 @router.get("/ui-state", response_model=UiStateResponse)
-async def ui_state(session: SessionDep, user_id: CurrentUserId) -> UiStateResponse:
+async def ui_state(session: SessionDep, payload: CurrentUserPayload) -> UiStateResponse:
     """Whether the company pickers and filters should show at all: only from two active companies."""
     service = LegalEntityService(session)
-    active = await service.list_entities()
+    scope = await _directory_scope(service, payload)
+    active = await service.list_entities(entity_ids=scope)
     default = await service.default_entity()
-    try:
-        mine = await service.my_entity_ids(uuid.UUID(str(user_id)))
-    except ValueError:
-        mine = []
+    mine = sorted(scope) if scope is not None else await service.my_entity_ids(uuid.UUID(payload["sub"]))
     return UiStateResponse(
         active_entity_count=len(active),
         multi_company=len(active) >= 2,
         my_entity_ids=mine,
-        default_entity_id=default.id if default is not None else None,
+        default_entity_id=default.id if default is not None and (scope is None or default.id in scope) else None,
     )
 
 
@@ -174,8 +188,10 @@ async def create_entity(data: LegalEntityCreate, session: SessionDep, _user_id: 
 
 
 @router.get("/entities/{entity_id}", response_model=LegalEntityResponse)
-async def get_entity(entity_id: uuid.UUID, session: SessionDep, _user_id: CurrentUserId) -> LegalEntityResponse:
+async def get_entity(entity_id: uuid.UUID, session: SessionDep, payload: CurrentUserPayload) -> LegalEntityResponse:
     service = LegalEntityService(session)
+    scope = await _directory_scope(service, payload)
+    _require_directory_access(entity_id, scope)
     return await _entity_response(service, await service.get_entity(entity_id))
 
 
@@ -249,10 +265,15 @@ def _member_response(member, user) -> MemberResponse:
 
 
 @router.get("/entities/{entity_id}/members/", response_model=MemberListResponse)
-async def list_members(entity_id: uuid.UUID, session: SessionDep, _user_id: CurrentUserId) -> MemberListResponse:
+async def list_members(entity_id: uuid.UUID, session: SessionDep, payload: CurrentUserPayload) -> MemberListResponse:
     service = LegalEntityService(session)
+    scope = await _directory_scope(service, payload)
+    _require_directory_access(entity_id, scope)
     rows = await service.list_members(entity_id)
-    return MemberListResponse(items=[_member_response(m, u) for m, u in rows], any_members=await service.any_members())
+    return MemberListResponse(
+        items=[_member_response(m, u) for m, u in rows],
+        any_members=await service.any_members() if scope is None else bool(rows),
+    )
 
 
 @router.post(
@@ -338,6 +359,14 @@ async def assign_project_entity(
     if not _is_admin(payload) and (project is None or str(project.owner_id) != user_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only an admin or the project owner")
     service = LegalEntityService(session)
+    scope = await _directory_scope(service, payload)
+    if scope is not None:
+        target = data.legal_entity_id
+        if target is None:
+            default = await service.default_entity()
+            target = default.id if default else None
+        if target is not None:
+            _require_directory_access(target, scope)
     entity, source, warnings = await service.assign_project(
         project_id, data.legal_entity_id, data.legal_entity_branch_id
     )

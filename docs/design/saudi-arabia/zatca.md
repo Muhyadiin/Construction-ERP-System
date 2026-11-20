@@ -71,7 +71,7 @@ clearance module. The clearance extension (pending outcomes, polling, payload bu
 eg-eta's commit `71fcb5308`, cherry-picked unchanged.
 
 **D2. No new dependency.** Signing uses `cryptography`, which is already in the lockfile through
-`python-jose[cryptography]` and supports secp256k1. HTTP goes through `httpx`, already a core dependency.
+`PyJWT[crypto]` and supports secp256k1. HTTP goes through `httpx`, already a core dependency.
 Canonicalization is the one piece the standard library cannot do: `xml.etree.ElementTree.canonicalize`
 implements C14N 2.0, which moves namespace declarations to first use and so changes the hash. `lxml` is a
 test-only dependency here. `c14n.py` carries the part of C14N 1.1 an invoice needs (about 300 lines, expat

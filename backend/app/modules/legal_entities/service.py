@@ -79,8 +79,8 @@ class LegalEntityService:
 
     # ── Entities ──────────────────────────────────────────────────────────
 
-    async def list_entities(self, *, include_inactive: bool = False) -> list[LegalEntity]:
-        return await self.entities.list(include_inactive=include_inactive)
+    async def list_entities(self, *, include_inactive: bool = False, entity_ids: set[uuid.UUID] | None = None) -> list[LegalEntity]:
+        return await self.entities.list(include_inactive=include_inactive, entity_ids=entity_ids)
 
     async def get_entity(self, entity_id: uuid.UUID) -> LegalEntity:
         entity = await self.entities.get(entity_id)

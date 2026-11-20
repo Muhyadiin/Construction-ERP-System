@@ -94,7 +94,7 @@ async def shared_auth(shared_client: AsyncClient) -> dict[str, str]:
 @pytest_asyncio.fixture(scope="module")
 async def shared_user_id(shared_auth: dict[str, str]) -> str:
     """Extract user ID from the module-scoped JWT token."""
-    from jose import jwt
+    import jwt
 
     from app.config import get_settings
 

@@ -48,7 +48,7 @@ except Exception:
     sys.modules["app.modules.users.repository"] = _fake_repository
 
 # Now we can safely import the service utilities and schemas.
-from jose import jwt  # noqa: E402
+import jwt  # noqa: E402
 
 from app.modules.users.schemas import (  # noqa: E402
     ChangePasswordRequest,

@@ -19,8 +19,8 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from jose import ExpiredSignatureError, JWTError, jwt
-from jose.exceptions import JWTClaimsError
+import jwt
+from jwt import InvalidSignatureError, InvalidTokenError
 
 from app.config import Settings
 
@@ -79,7 +79,7 @@ def decode_jwt(token: str, settings: Settings) -> dict[str, Any]:
     """Verify ``token`` against the key ring and return its claims.
 
     Raises:
-        JWTError: the token is malformed, expired, carries an unknown ``kid``
+        InvalidTokenError: the token is malformed, expired, carries an unknown ``kid``
             or verifies against none of the configured keys.
     """
     header = jwt.get_unverified_header(token)
@@ -91,16 +91,12 @@ def decode_jwt(token: str, settings: Settings) -> dict[str, Any]:
         for key_id, secret in keys:
             if key_id == kid:
                 return jwt.decode(token, secret, algorithms=algorithms)
-        raise JWTError("Unknown signing key id")
+        raise InvalidTokenError("Unknown signing key id")
 
-    last_error: JWTError | None = None
+    last_error: InvalidTokenError | None = None
     for _key_id, secret in keys:
         try:
             return jwt.decode(token, secret, algorithms=algorithms)
-        except (ExpiredSignatureError, JWTClaimsError):
-            # The signature matched this key, so the claims are the problem
-            # and no other key can fix them.
-            raise
-        except JWTError as exc:
+        except InvalidSignatureError as exc:
             last_error = exc
-    raise last_error or JWTError("No signing key configured")
+    raise last_error or InvalidTokenError("No signing key configured")

@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError
+from jwt import InvalidTokenError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import HTTPConnection
@@ -97,7 +97,7 @@ def decode_access_token(
     try:
         payload = decode_jwt(token, settings)
         user_id: str | None = payload.get("sub")
-        if user_id is None:
+        if not user_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token: missing subject",
@@ -122,7 +122,7 @@ def decode_access_token(
                     detail=(f"Invalid token: wrong type (expected '{expected_type}', got '{token_type or 'none'}')"),
                 )
         return payload
-    except JWTError as exc:
+    except InvalidTokenError as exc:
         # Do NOT echo the raw jose exception text to the client - it leaks
         # crypto-library internals (algorithm names, signature/segment counts,
         # expiry deltas) that aid token-forgery probing. Log the full detail

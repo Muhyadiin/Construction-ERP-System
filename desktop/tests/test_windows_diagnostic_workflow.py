@@ -78,7 +78,7 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
     def test_artifact_has_sha_identity_and_missing_installer_fails(self):
         steps = self.jobs['build-tauri']['steps']
         upload = next(s for s in steps if s.get('name') == 'Upload Windows diagnostic installer')
-        self.assertEqual(upload['uses'], 'actions/upload-artifact@v4')
+        self.assertRegex(upload['uses'], r'^actions/upload-artifact@[0-9a-f]{40}$')
         self.assertIn('windows-diagnostic-${{ github.sha }}', upload['with']['name'])
         self.assertEqual(upload['with']['if-no-files-found'], 'error')
         fingerprint = next(s for s in steps if s.get('name') == 'Fingerprint the diagnostic installer and sidecar')

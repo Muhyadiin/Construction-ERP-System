@@ -9,7 +9,7 @@ clock.
 
 Audit findings (2026-04-26 — recorded for traceability):
 
-* ``app.dependencies.decode_access_token`` delegates to ``jose.jwt.decode``,
+* ``app.dependencies.decode_access_token`` delegates to ``jwt.decode``,
   whose HS256 verify uses ``hmac.compare_digest`` internally — constant
   time wrt. the signature payload.
 * ``app.dependencies.get_current_user_payload`` keeps the failure shape
@@ -50,8 +50,8 @@ except Exception:
     _fake_database.GUID = MagicMock  # type: ignore[attr-defined]
     sys.modules["app.database"] = _fake_database
 
+import jwt  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
-from jose import jwt  # noqa: E402
 
 from app.dependencies import decode_access_token  # noqa: E402
 
@@ -171,7 +171,7 @@ def test_no_order_of_magnitude_timing_leak_between_failure_modes() -> None:
       * ``valid-signature, missing-sub``  — fails AFTER hmac succeeds.
       * ``valid-signature, tampered-sig`` — fails INSIDE hmac.
 
-    Both go through ``jose.jwt.decode``. If the signature path took (e.g.)
+    Both go through ``jwt.decode``. If the signature path took (e.g.)
     10x longer than the post-decode field check, an attacker could
     distinguish "did my forged signature happen to verify?" from network
     latency. We allow one path to be at most 5x the other, measured on

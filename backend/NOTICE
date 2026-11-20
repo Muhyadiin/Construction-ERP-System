@@ -57,7 +57,7 @@ Backend (base install via `pip install openconstructionerp`):
   * certifi ............................. MPL-2.0
   * orjson .............................. MPL-2.0 AND (Apache-2.0 OR MIT)
   * structlog ........................... Apache-2.0 / MIT
-  * python-jose ......................... MIT
+  * PyJWT ............................... MIT
   * bcrypt .............................. Apache-2.0
   * ezdxf ............................... MIT
   * trimesh ............................. MIT

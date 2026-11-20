@@ -1162,8 +1162,18 @@ async def test_company_membership_scopes_cost_report_and_budget_edits(client: As
                 },
             )
         )
-        members.append((auth, pid, budget["id"]))
-    for index, (auth, pid, budget_id) in enumerate(members):
+        members.append((auth, pid, budget["id"], company["id"]))
+    for index, (auth, pid, budget_id, company_id) in enumerate(members):
+        # The same memberships scope the company picker, details and personal roster.
+        visible = await _ok(await client.get(entities, headers=auth))
+        assert [record["id"] for record in visible["items"]] == [company_id]
+        state = await _ok(await client.get(f"{API}/legal-entities/ui-state", headers=auth))
+        assert state["active_entity_count"] == 1 and state["my_entity_ids"] == [company_id]
+        roster = await _ok(await client.get(f"{entities}{company_id}/members/", headers=auth))
+        assert len(roster["items"]) == 1
+        other_company = members[1 - index][3]
+        for suffix in ("", "/members/"):
+            assert (await client.get(f"{entities}{other_company}{suffix}", headers=auth)).status_code == 404
         other = members[1 - index][1]
         url = f"{API}/finance/project-cost-report/"
         own = await _ok(await client.get(url, headers=auth, params={"project_id": pid}))
