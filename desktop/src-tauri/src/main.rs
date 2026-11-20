@@ -692,6 +692,9 @@ fn home_dir() -> Option<PathBuf> {
 
 /// Path of the launcher diagnostic log (same folder the backend uses for data).
 fn log_path() -> Option<PathBuf> {
+    if cfg!(feature = "kobci-windows") {
+        return workspace_data_dir().map(|dir| dir.join("logs").join("desktop-launcher.log"));
+    }
     home_dir().map(|h| h.join(".openestimate").join("desktop-launcher.log"))
 }
 
@@ -1318,7 +1321,7 @@ impl TracebackCapture {
 /// It is also one of the ports the attach probe below looks at, so a backend
 /// left over from a previous run is found and reused instead of becoming a
 /// second owner of the same PostgreSQL cluster.
-const DEFAULT_BACKEND_PORT: u16 = 8732;
+const DEFAULT_BACKEND_PORT: u16 = if cfg!(feature = "kobci-windows") { 8765 } else { 8732 };
 
 /// Find a port for the backend server, preferring a STABLE one.
 ///
@@ -4055,8 +4058,12 @@ fn start_local_backend(
             // working directory is exactly what shipped, so a machine
             // whose home directory cannot be read is left no worse off
             // than it is today.
-            if let Some(home) = home_dir() {
-                let workdir = home.join(".openestimate");
+            let workdir = if cfg!(feature = "kobci-windows") {
+                workspace_data_dir()
+            } else {
+                home_dir().map(|home| home.join(".openestimate"))
+            };
+            if let Some(workdir) = workdir {
                 if std::fs::create_dir_all(&workdir).is_ok() {
                     cmd = cmd.current_dir(&workdir);
                 }
@@ -4582,6 +4589,16 @@ info@datadrivenconstruction.io. Installation help: https://openconstructionerp.c
 }
 
 fn main() {
+    #[cfg(all(windows, feature = "kobci-windows"))]
+    {
+        // Preview 1 kept its PostgreSQL cluster, keys and attachments here.
+        // Resolve the same folder before the first workspace or logging probe.
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            std::env::set_var("OE_DATA_DIR", PathBuf::from(local).join("Kobci Construction ERP").join("Data"));
+        }
+        std::env::set_var("SEED_DEMO", "false");
+        std::env::set_var("OE_DISABLE_UPDATE_CHECK", "1");
+    }
     // Write the diagnostic log at the VERY FIRST instruction, before anything
     // else in startup can fail. If the user reports "I click the icon and
     // nothing happens", this line guarantees the log file at least exists and

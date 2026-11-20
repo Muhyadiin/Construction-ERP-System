@@ -1,21 +1,21 @@
 name: Publish Kobci Windows preview
 on:
   push:
-    branches: [publish/kobci-windows-preview-1]
+    branches: [publish/kobci-windows-preview-2]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: kobci-windows-preview-1
+  group: kobci-windows-preview-2
   cancel-in-progress: false
 
 jobs:
   build:
-    if: github.repository == 'Muhyadiin/Construction-ERP-System' && github.ref == 'refs/heads/publish/kobci-windows-preview-1'
+    if: github.repository == 'Muhyadiin/Construction-ERP-System' && github.ref == 'refs/heads/publish/kobci-windows-preview-2'
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 65
     permissions:
       contents: read
       actions: read
@@ -32,11 +32,14 @@ jobs:
           RUNTIME: c48ba24de230a3a59f1d490fbd77eb3a016fdbc7
         run: |
           set -euo pipefail
-          git diff --exit-code "$RUNTIME" "$GITHUB_SHA" -- ':(top)**' ':(top,exclude)backend/tests/**' ':(top,exclude)desktop/kobci-windows/**' ':(top,exclude)docs/kobci/**' ':(top,exclude).github/workflows/kobci-windows-preview.yml'
+          git diff --exit-code "$RUNTIME" "$GITHUB_SHA" -- ':(top)**' ':(top,exclude)backend/tests/**' ':(top,exclude)desktop/kobci-windows/**' ':(top,exclude)docs/kobci/**' ':(top,exclude).github/workflows/kobci-windows-preview.yml' ':(top,exclude)desktop/src-tauri/Cargo.toml' ':(top,exclude)desktop/src-tauri/src/main.rs'
           metadata=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/14614632426")
           echo "$metadata" | jq -e --arg sha "$RUNTIME" '.expired == false and .workflow_run.id == 44702777534 and .workflow_run.head_sha == $sha and .name == ("sidecar-x86_64-pc-windows-msvc-" + $sha + "-1")'
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/14614632426/zip" > sidecar.zip
           python prepare.py
+      - name: Build the native Kobci window and verify the Microsoft WebView2 bootstrapper
+        shell: pwsh
+        run: ./desktop/kobci-windows/build-desktop.ps1
       - name: Build the per-user installer
         working-directory: desktop/kobci-windows
         shell: pwsh
@@ -57,7 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir release-files
-          mv Kobci-Construction-ERP-Windows-x64-Preview-1.exe release-files/
+          mv Kobci-Construction-ERP-Windows-x64-Preview-2.exe release-files/
           python -c "from pathlib import Path; import shutil; ui, = Path('payload/server').rglob('_frontend_dist'); assert (ui / 'index.html').is_file(); shutil.make_archive('release-files/Kobci-ERP-web-ui', 'zip', ui)"
           cd release-files
           sha256sum *.exe *.zip > SHA256SUMS.txt
@@ -87,12 +90,12 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: kobci-windows-preview-1
+          TAG: kobci-windows-preview-2
         run: |
           set -euo pipefail
           cd downloads
           sha256sum --check SHA256SUMS.txt
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --prerelease --latest=false --title "Kobci Construction ERP — Windows community preview 1" \
+            --prerelease --latest=false --title "Kobci Construction ERP — Windows desktop preview 2" \
             --notes-file ../desktop/kobci-windows/README.md \
-            Kobci-Construction-ERP-Windows-x64-Preview-1.exe Kobci-ERP-web-ui.zip SHA256SUMS.txt
+            Kobci-Construction-ERP-Windows-x64-Preview-2.exe Kobci-ERP-web-ui.zip SHA256SUMS.txt
