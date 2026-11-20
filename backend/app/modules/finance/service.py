@@ -84,10 +84,17 @@ CONTINGENCY_DRAWDOWN_PREFIX = "contingency_drawdown:"
 
 def _is_budget_provenance(key: str) -> bool:
     """Fields written by BOQ approval, document reconciliation and authorized drawdowns."""
-    return key in {"boq_id", "budget_sync", "actual_from_receipts"} or key.startswith((
-        CONTINGENCY_DRAWDOWN_PREFIX, "from_boq:", "boq_fx:", "sync:", "committed_from_po:",
-        "received_from_gr:", "released_by_payment:",
-    ))
+    return key in {"boq_id", "budget_sync", "actual_from_receipts"} or key.startswith(
+        (
+            CONTINGENCY_DRAWDOWN_PREFIX,
+            "from_boq:",
+            "boq_fx:",
+            "sync:",
+            "committed_from_po:",
+            "received_from_gr:",
+            "released_by_payment:",
+        )
+    )
 
 
 def _editable_budget_metadata(metadata: object) -> dict[str, Any]:
@@ -2674,25 +2681,29 @@ class FinanceService:
 
         # Serialize all bills entering one project's budget, including two
         # different bills which create a shared WBS row for the first time.
-        project = (await self.session.execute(
-            select(Project).where(Project.id == project_id).with_for_update(of=Project)
-        )).scalar_one()
-        bill = (await self.session.execute(
-            select(BOQ).where(BOQ.id == boq_id, BOQ.project_id == project_id)
-        )).scalar_one()
+        project = (
+            await self.session.execute(select(Project).where(Project.id == project_id).with_for_update(of=Project))
+        ).scalar_one()
+        bill = (
+            await self.session.execute(select(BOQ).where(BOQ.id == boq_id, BOQ.project_id == project_id))
+        ).scalar_one()
         if not bill.is_locked or bill.parent_estimate_id or bill.variation_request_id:
             # Scenarios, revisions and variation bills price changes to scope.
             # Their full value would duplicate the original bill.
             return []
 
         marker = f"from_boq:{boq_id}"
-        existing = list((await self.session.scalars(
-            select(ProjectBudget).where(
-                ProjectBudget.project_id == project_id,
-                (ProjectBudget.metadata_["boq_id"].as_string() == str(boq_id))
-                | ProjectBudget.metadata_[marker].as_string().is_not(None),
-            )
-        )).all())
+        existing = list(
+            (
+                await self.session.scalars(
+                    select(ProjectBudget).where(
+                        ProjectBudget.project_id == project_id,
+                        (ProjectBudget.metadata_["boq_id"].as_string() == str(boq_id))
+                        | ProjectBudget.metadata_[marker].as_string().is_not(None),
+                    )
+                )
+            ).all()
+        )
         if existing:
             return existing
 
@@ -2709,21 +2720,33 @@ class FinanceService:
             missing: set[str] = set()
             codes = {_position_currency(pos)} | {
                 str(r.get("currency") or "").strip().upper()
-                for r in (resource_rows if isinstance(resource_rows, list) else []) if isinstance(r, dict)
+                for r in (resource_rows if isinstance(resource_rows, list) else [])
+                if isinstance(r, dict)
             }
             for code in codes - {"", currency_code}:
                 rate = _safe_decimal(rates.get(code))
-                if not currency_code or not rate.is_finite() or rate <= 0 or resource_fx_factor(code, currency_code, rates) is None:
+                if (
+                    not currency_code
+                    or not rate.is_finite()
+                    or rate <= 0
+                    or resource_fx_factor(code, currency_code, rates) is None
+                ):
                     missing.add(code)
                 else:
                     used_rates[code] = rates[code]
             if missing:
-                raise HTTPException(409, detail=f"Set the project currency and positive exchange rates for {', '.join(sorted(missing))} before budgeting.")
+                raise HTTPException(
+                    409,
+                    detail=f"Set the project currency and positive exchange rates for {', '.join(sorted(missing))} before budgeting.",
+                )
             key = (pos.wbs_id or "").strip() or None
             by_wbs[key] = by_wbs.get(key, Decimal(0)) + _leaf_total_base_with_resources(pos, rates, currency_code)
         evidence = {
-            "base_currency": currency_code, "base_units_per_foreign_unit": used_rates,
-            "source": "project.fx_rates", "approved_at": bill.approved_at, "approved_by": bill.approved_by,
+            "base_currency": currency_code,
+            "base_units_per_foreign_unit": used_rates,
+            "source": "project.fx_rates",
+            "approved_at": bill.approved_at,
+            "approved_by": bill.approved_by,
         }
         touched: list[ProjectBudget] = []
         # Create the rows in WBS order. The positions come back in whatever

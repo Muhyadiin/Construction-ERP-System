@@ -248,7 +248,7 @@ class InvoiceRepository:
                 status_counts[status] += cnt
             if status not in ("paid", "cancelled"):
                 code = currency_code or ""
-                amount = (total or Decimal(0))
+                amount = total or Decimal(0)
                 if direction == "payable":
                     payable_by_currency[code] = payable_by_currency.get(code, Decimal(0)) + amount
                 elif direction == "receivable":
@@ -282,7 +282,9 @@ class InvoiceRepository:
         overdue_by_currency: dict[str, Decimal] = {}
         overdue_count = 0
         for currency_code, cnt, total in overdue_rows:
-            overdue_by_currency[currency_code or ""] = overdue_by_currency.get(currency_code or "", Decimal(0)) + (total or Decimal(0))
+            overdue_by_currency[currency_code or ""] = overdue_by_currency.get(currency_code or "", Decimal(0)) + (
+                total or Decimal(0)
+            )
             overdue_count += cnt
 
         # Dominant invoice currency - used as a dashboard fallback when no
@@ -548,7 +550,9 @@ class BudgetRepository:
             func.coalesce(func.sum(cast(ProjectBudget.committed, Numeric)), 0),
             func.coalesce(func.sum(cast(ProjectBudget.actual, Numeric)), 0),
             func.coalesce(func.sum(outturn_col), 0),
-            func.sum(case((forecast_col > committed_col + actual_col, forecast_col - committed_col - actual_col), else_=0)),
+            func.sum(
+                case((forecast_col > committed_col + actual_col, forecast_col - committed_col - actual_col), else_=0)
+            ),
             func.sum(case((forecast_col > 0, 0), else_=1)),
         )
         if project_id is not None:

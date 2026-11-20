@@ -16,7 +16,9 @@ class LegalEntityRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def list(self, *, include_inactive: bool = False, entity_ids: set[uuid.UUID] | None = None) -> list[LegalEntity]:
+    async def list(
+        self, *, include_inactive: bool = False, entity_ids: set[uuid.UUID] | None = None
+    ) -> list[LegalEntity]:
         stmt = select(LegalEntity).order_by(LegalEntity.code)
         if entity_ids is not None:
             stmt = stmt.where(LegalEntity.id.in_(entity_ids))

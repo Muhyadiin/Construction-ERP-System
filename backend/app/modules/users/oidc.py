@@ -111,8 +111,12 @@ async def verify_id_token(
         try:
             public_key = jwt.PyJWK.from_dict(key, algorithm=alg)
             claims = jwt.decode(
-                id_token, public_key, algorithms=[alg], audience=client_id,
-                issuer=discovery["issuer"], options={"require": ["exp", "iat", "sub", "iss", "aud"]},
+                id_token,
+                public_key,
+                algorithms=[alg],
+                audience=client_id,
+                issuer=discovery["issuer"],
+                options={"require": ["exp", "iat", "sub", "iss", "aud"]},
             )
         except (PyJWTError, ValueError, TypeError):
             continue

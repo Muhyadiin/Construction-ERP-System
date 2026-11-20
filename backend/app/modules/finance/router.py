@@ -2574,7 +2574,9 @@ async def create_evm_snapshot(
     dependencies=[Depends(RequirePermission("finance.read")), Depends(RequirePermission("contracts.read"))],
 )
 async def read_project_cost_report(
-    project_id: uuid.UUID, session: SessionDep, user_id: CurrentUserId,
+    project_id: uuid.UUID,
+    session: SessionDep,
+    user_id: CurrentUserId,
 ) -> ProjectCostReport:
     await _require_project_access(session, project_id, user_id)
     return await project_cost_report(session, project_id)
