@@ -130,7 +130,7 @@ def test_hmac_over_raw_body():
 
 
 def test_jwt_verify():
-    from jose import jwt
+    import jwt
 
     secret = "jwt-secret"
     token = jwt.encode({"sub": "form"}, secret, algorithm="HS256")
@@ -269,7 +269,7 @@ async def test_hmac_valid_and_tampered(session):
 
 @pytest.mark.asyncio
 async def test_jwt_auth(session):
-    from jose import jwt
+    import jwt
 
     svc = WebhookLeadsService(session)
     sid, secret = await _new_source(svc, auth_method="jwt")

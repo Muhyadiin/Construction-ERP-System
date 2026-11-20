@@ -44,7 +44,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from jose import JWTError
+from jwt import InvalidTokenError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -244,7 +244,7 @@ class PortalLinkService:
 
         try:
             payload = decode_jwt(token, self.settings)
-        except JWTError:
+        except InvalidTokenError:
             raise PortalTokenError() from None
 
         # Scope claim is the single gate that separates portal tokens

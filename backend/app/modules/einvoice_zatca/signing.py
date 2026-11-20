@@ -20,7 +20,7 @@ certificate. Where the private key lives is the signer's business:
 
 The curve is secp256k1. The Security Features standard says "ECDSA, 256 bit";
 ZATCA's CA issues secp256k1 certificates and its SDK signs with that curve.
-``cryptography`` (already in the lockfile through ``python-jose``) supports it.
+``cryptography`` (already in the lockfile through ``PyJWT[crypto]``) supports it.
 """
 
 from __future__ import annotations

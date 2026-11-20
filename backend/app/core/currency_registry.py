@@ -83,6 +83,8 @@ CURRENCIES: dict[str, dict[str, Any]] = {
     "DOP": {"symbol": "RD$", "name": "Dominican Peso", "decimals": 2},
     "GTQ": {"symbol": "Q", "name": "Guatemalan Quetzal", "decimals": 2},
     "CRC": {"symbol": "₡", "name": "Costa Rican Colón", "decimals": 2},
+    # Kobci local accounting identifier, distinct from ISO SOS (Somali shilling).
+    "SLS": {"symbol": "SL SH", "name": "Somaliland shilling", "decimals": 2},
     # Middle East & Africa
     "AED": {"symbol": "د.إ", "name": "UAE Dirham", "decimals": 2},
     "SAR": {"symbol": "﷼", "name": "Saudi Riyal", "decimals": 2},

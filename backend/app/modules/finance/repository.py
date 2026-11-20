@@ -229,8 +229,8 @@ class InvoiceRepository:
 
         # Per-currency subtotals: {currency_code: amount}. Empty currency_code
         # is kept under "" so the service treats it as the base currency.
-        payable_by_currency: dict[str, float] = {}
-        receivable_by_currency: dict[str, float] = {}
+        payable_by_currency: dict[str, Decimal] = {}
+        receivable_by_currency: dict[str, Decimal] = {}
         status_counts: dict[str, int] = {
             "draft": 0,
             "pending": 0,
@@ -248,11 +248,11 @@ class InvoiceRepository:
                 status_counts[status] += cnt
             if status not in ("paid", "cancelled"):
                 code = currency_code or ""
-                amount = float(total or 0)
+                amount = total or Decimal(0)
                 if direction == "payable":
-                    payable_by_currency[code] = payable_by_currency.get(code, 0.0) + amount
+                    payable_by_currency[code] = payable_by_currency.get(code, Decimal(0)) + amount
                 elif direction == "receivable":
-                    receivable_by_currency[code] = receivable_by_currency.get(code, 0.0) + amount
+                    receivable_by_currency[code] = receivable_by_currency.get(code, Decimal(0)) + amount
 
         # Overdue count + per-currency amount
         from datetime import date
@@ -279,11 +279,11 @@ class InvoiceRepository:
         overdue_base = overdue_base.group_by(Invoice.currency_code)
 
         overdue_rows = (await self.session.execute(overdue_base)).all()
-        overdue_by_currency: dict[str, float] = {}
+        overdue_by_currency: dict[str, Decimal] = {}
         overdue_count = 0
         for currency_code, cnt, total in overdue_rows:
-            overdue_by_currency[currency_code or ""] = overdue_by_currency.get(currency_code or "", 0.0) + float(
-                total or 0
+            overdue_by_currency[currency_code or ""] = overdue_by_currency.get(currency_code or "", Decimal(0)) + (
+                total or Decimal(0)
             )
             overdue_count += cnt
 
@@ -550,6 +550,10 @@ class BudgetRepository:
             func.coalesce(func.sum(cast(ProjectBudget.committed, Numeric)), 0),
             func.coalesce(func.sum(cast(ProjectBudget.actual, Numeric)), 0),
             func.coalesce(func.sum(outturn_col), 0),
+            func.sum(
+                case((forecast_col > committed_col + actual_col, forecast_col - committed_col - actual_col), else_=0)
+            ),
+            func.sum(case((forecast_col > 0, 0), else_=1)),
         )
         if project_id is not None:
             base = base.where(ProjectBudget.project_id == project_id)
@@ -559,18 +563,22 @@ class BudgetRepository:
 
         rows = (await self.session.execute(base)).all()
 
-        original_by_currency: dict[str, float] = {}
-        revised_by_currency: dict[str, float] = {}
-        committed_by_currency: dict[str, float] = {}
-        actual_by_currency: dict[str, float] = {}
-        outturn_by_currency: dict[str, float] = {}
-        for currency_code, original, revised, committed, actual, outturn in rows:
+        original_by_currency: dict[str, Decimal] = {}
+        revised_by_currency: dict[str, Decimal] = {}
+        committed_by_currency: dict[str, Decimal] = {}
+        actual_by_currency: dict[str, Decimal] = {}
+        outturn_by_currency: dict[str, Decimal] = {}
+        uncommitted_by_currency: dict[str, Decimal] = {}
+        missing_forecasts: dict[str, int] = {}
+        for currency_code, original, revised, committed, actual, outturn, uncommitted, missing in rows:
             code = currency_code or ""
-            original_by_currency[code] = original_by_currency.get(code, 0.0) + float(original)
-            revised_by_currency[code] = revised_by_currency.get(code, 0.0) + float(revised)
-            committed_by_currency[code] = committed_by_currency.get(code, 0.0) + float(committed)
-            actual_by_currency[code] = actual_by_currency.get(code, 0.0) + float(actual)
-            outturn_by_currency[code] = outturn_by_currency.get(code, 0.0) + float(outturn)
+            uncommitted_by_currency[code] = uncommitted
+            missing_forecasts[code] = missing
+            original_by_currency[code] = original_by_currency.get(code, Decimal(0)) + original
+            revised_by_currency[code] = revised_by_currency.get(code, Decimal(0)) + revised
+            committed_by_currency[code] = committed_by_currency.get(code, Decimal(0)) + committed
+            actual_by_currency[code] = actual_by_currency.get(code, Decimal(0)) + actual
+            outturn_by_currency[code] = outturn_by_currency.get(code, Decimal(0)) + outturn
 
         # A project whose only budget rows are change order deltas has no row
         # carrying its original budget, so the sums above would show it as
@@ -578,8 +586,8 @@ class BudgetRepository:
         for code, baseline in (
             await self._change_order_only_baselines(project_id=project_id, project_ids=project_ids)
         ).items():
-            original_by_currency[code] = original_by_currency.get(code, 0.0) + float(baseline)
-            revised_by_currency[code] = revised_by_currency.get(code, 0.0) + float(baseline)
+            original_by_currency[code] = original_by_currency.get(code, Decimal(0)) + baseline
+            revised_by_currency[code] = revised_by_currency.get(code, Decimal(0)) + baseline
 
         # Resolve the dominant currency for the dashboard so the UI does
         # not have to hardcode one. We pick the most-used non-empty
@@ -608,6 +616,8 @@ class BudgetRepository:
             "committed_by_currency": committed_by_currency,
             "actual_by_currency": actual_by_currency,
             "outturn_by_currency": outturn_by_currency,
+            "uncommitted_by_currency": uncommitted_by_currency,
+            "missing_forecasts": missing_forecasts,
             "currency": currency,
         }
 

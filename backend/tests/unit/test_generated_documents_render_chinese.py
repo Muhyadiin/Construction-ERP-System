@@ -31,7 +31,6 @@ suite where both directions look alike is measuring the PDF library, not us.
 from __future__ import annotations
 
 import io
-import subprocess
 import types
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -153,47 +152,7 @@ def ns(**kwargs: Any) -> types.SimpleNamespace:
     return types.SimpleNamespace(**kwargs)
 
 
-def source_before_the_wiring(path: str, marker: str) -> str:
-    """The newest version of *path* whose source lacks *marker*, or "" if none.
-
-    Three tests below rebuild a PDF builder as it stood before the face wiring
-    and compare its output to today's. That is the only way the claim that
-    Latin documents did not move a byte can be checked against the real
-    previous implementation rather than against a copy of itself. They walk
-    history rather than read HEAD, because HEAD carries the wiring now and a
-    test anchored there would skip itself and pass forever without comparing
-    anything.
-
-    This needs real git history. CI supplies it with ``fetch-depth: 0`` and
-    ``filter: blob:none``, so a ``git show`` here may fetch from origin, and it
-    must fail rather than skip if it cannot: the walk runs with ``check=True``
-    and nothing catching around it, because a skip CI does not count is a pass
-    wearing a different word. The walk grows with the file's history.
-
-    The plain walk runs first and the rename-following one only if it found
-    nothing. ``--follow`` diffs blobs to detect renames, so against the blobless
-    clone CI checks out it fetches every blob it compares: 188 MB and 15 s,
-    against 11 MB and 2 s for the plain walk. Only a rename needs it, so only a
-    rename pays for it.
-
-    Returns the empty string rather than raising when nothing is reachable, so
-    that each caller can assert on it and name the builder it was looking for.
-    A single message from in here would say the same thing three times and
-    identify none of them.
-    """
-    repo = Path(__file__).resolve().parents[3]
-
-    def git(*args: str) -> str:
-        return subprocess.run([*args], capture_output=True, cwd=repo, check=True).stdout.decode("utf-8")
-
-    for follow in ((), ("--follow",)):
-        # --name-only names the path each commit had, so a renamed file is read where it then lived.
-        lines = git("git", "log", *follow, "--format=%H", "--name-only", "--", path).split()
-        for sha, at in zip(lines[::2], lines[1::2], strict=True):
-            candidate = git("git", "show", f"{sha}:{at}")
-            if marker not in candidate:
-                return candidate
-    return ""
+_UPSTREAM_FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "kobci_upstream"
 
 
 # ── The bill of quantities ──────────────────────────────────────────────────
@@ -695,25 +654,20 @@ def test_a_latin_invoice_is_byte_for_byte_what_it_was_before_the_wiring() -> Non
     produced today is identical to the page produced by the builder as it stood
     before any of this, down to the byte.
 
-    The comparison runs against the real previous implementation, read out of
-    git rather than reimplemented here, so it cannot pass by agreeing with a
+    The comparison runs against the real previous implementation, preserved in
+    the upstream fixture, so it cannot pass by agreeing with a
     copy of itself. reportlab's invariant mode fixes the creation date and the
     document identifier, which are the only bytes that would otherwise differ
     for reasons that have nothing to do with fonts.
 
-    The earlier builder is found by walking the file's history for the most
-    recent version that predates the wiring, rather than by reading HEAD. The
-    difference matters: once this change is committed, HEAD carries the wiring
-    and a test anchored there would skip itself and go on passing forever
-    without comparing anything.
+    The reference fixture preserves the original upstream implementation.
     """
     import reportlab.rl_config as rl_config
 
     from app.modules.einvoice import build_einvoice
     from app.modules.einvoice.pdf_embed import _readable_pdf
 
-    source = source_before_the_wiring("backend/app/modules/einvoice/pdf_embed.py", "def put(")
-    assert source, "no version of the invoice builder predating the wiring is reachable in this history"
+    source = (_UPSTREAM_FIXTURES / "invoice-pdf.txt").read_text(encoding="utf-8")
 
     module = types.ModuleType("pdf_embed_before")
     module.__file__ = "pdf_embed_before.py"
@@ -1464,13 +1418,10 @@ def test_a_latin_payment_application_is_laid_out_as_it_was_before_the_wiring(mon
 
     Facing a helper that every cell of the schedule passes through could quietly
     restyle every application already issued. This compares against the real
-    previous builder, read out of git rather than reimplemented here, so it
+    previous builder, preserved as an upstream fixture, so it
     cannot pass by agreeing with a copy of itself.
 
-    The earlier builder is found by walking the file's history for the most
-    recent version that predates the wiring rather than by reading HEAD, because
-    HEAD carries the wiring and a test anchored there would skip itself and pass
-    forever without comparing anything.
+    The reference fixture preserves the original upstream implementation.
 
     What this has compared, and why it keeps getting weaker.
 
@@ -1552,8 +1503,7 @@ def test_a_latin_payment_application_is_laid_out_as_it_was_before_the_wiring(mon
     from app.modules.us_pack import aia_pdf
     from app.modules.us_pack.aia_pdf import render_aia_application_pdf
 
-    source = source_before_the_wiring("backend/app/modules/us_pack/aia_pdf.py", "pdf_style_for_text")
-    assert source, "no version of the application builder predating the wiring is reachable in this history"
+    source = (_UPSTREAM_FIXTURES / "payment-application-pdf.txt").read_text(encoding="utf-8")
 
     module = types.ModuleType("aia_pdf_before")
     module.__file__ = "aia_pdf_before.py"
@@ -1796,9 +1746,7 @@ def test_a_latin_methodology_is_laid_out_as_it_was_before_the_wiring() -> None:
     """The claim the wiring commit made about itself, checked rather than asserted.
 
     Compares against the real previous builder read out of git, so it cannot
-    pass by agreeing with a copy of itself, and walks the history for the most
-    recent version predating the wiring rather than anchoring on HEAD, which
-    would skip itself and pass forever without comparing anything.
+    pass by agreeing with a copy of itself, using the pinned upstream builder as the reference.
 
     This compared bytes until the step table's header row was given the colour
     its own TableStyle had been asking for. That row is filled #1a1a2e and the
@@ -1818,8 +1766,7 @@ def test_a_latin_methodology_is_laid_out_as_it_was_before_the_wiring() -> None:
 
     from app.modules.methodology.pdf_export import generate_methodology_pdf
 
-    source = source_before_the_wiring("backend/app/modules/methodology/pdf_export.py", "pdf_style_for_text")
-    assert source, "no version of the methodology builder predating the wiring is reachable in this history"
+    source = (_UPSTREAM_FIXTURES / "methodology-pdf.txt").read_text(encoding="utf-8")
 
     module = types.ModuleType("methodology_pdf_before")
     module.__file__ = "methodology_pdf_before.py"

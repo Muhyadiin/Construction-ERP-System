@@ -1818,7 +1818,7 @@ async def duplicate_position(
     "/boqs/{boq_id}/lock/",
     response_model=BOQResponse,
     summary="Lock BOQ",
-    dependencies=[Depends(RequirePermission("boq.update"))],
+    dependencies=[Depends(RequirePermission("boq.approve_baseline"))],
 )
 async def lock_boq(
     boq_id: uuid.UUID,
@@ -1916,6 +1916,12 @@ async def lock_boq(
 
     boq = await service.get_boq(boq_id)
 
+    # Commit the Finance baseline in the approval transaction. The detached
+    # cost-model notification may run after the first dashboard read.
+    from app.modules.finance.service import FinanceService
+
+    await FinanceService(service.session).seed_budget_from_boq(boq.project_id, boq_id)
+
     # OC-41: Locking a BOQ should create budget lines in the cost model so
     # the Finance tab reflects the locked estimate immediately. Previously
     # the event was published but had no subscriber, leaving Finance at $0.
@@ -1934,7 +1940,7 @@ async def lock_boq(
     "/boqs/{boq_id}/unlock/",
     response_model=BOQResponse,
     summary="Unlock BOQ",
-    dependencies=[Depends(RequirePermission("boq.update"))],
+    dependencies=[Depends(RequirePermission("boq.approve_baseline"))],
 )
 async def unlock_boq(
     boq_id: uuid.UUID,
@@ -2018,7 +2024,7 @@ async def unlock_boq(
     summary="Create budget from BOQ",
     description="Create project budget lines from BOQ sections/positions. "
     "BOQ must be locked first. Groups positions by WBS or section.",
-    dependencies=[Depends(RequirePermission("boq.update"))],
+    dependencies=[Depends(RequirePermission("boq.approve_baseline"))],
 )
 async def create_budget_from_boq(
     boq_id: uuid.UUID,
@@ -2088,6 +2094,8 @@ async def create_budget_from_boq(
         # seeds the same bill from a session of its own. It has to find this
         # bill's share already there, or it writes it a second time.
         await session.commit()
+    except HTTPException:
+        raise
     except Exception as exc:
         _log.exception("Failed to create budgets from BOQ %s: %s", boq_id, exc)
         raise HTTPException(

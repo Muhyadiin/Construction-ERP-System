@@ -195,7 +195,7 @@ class TestAdminOnly:
 
 class TestScopedToken:
     def test_scope_claim_is_read(self) -> None:
-        from jose import jwt
+        import jwt
 
         token = jwt.encode({"sub": "u", "oe_mod": "oe_zipdemo"}, "k", algorithm="HS256")
         assert token_scope(f"Bearer {token}") == "oe_zipdemo"

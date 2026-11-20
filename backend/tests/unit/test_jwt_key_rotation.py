@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import jwt
 import pytest
 from cryptography.fernet import Fernet
 from fastapi import HTTPException
-from jose import JWTError, jwt
+from jwt import InvalidTokenError
 
 from app.config import Settings
 from app.core import crypto
@@ -56,7 +57,7 @@ def test_token_signed_with_previous_key_valid_after_rotation() -> None:
 
 def test_rotation_without_previous_key_rejects_old_tokens() -> None:
     token = encode_jwt(_claims(), _settings(OLD))
-    with pytest.raises(JWTError):
+    with pytest.raises(InvalidTokenError):
         decode_jwt(token, _settings(NEW))
     with pytest.raises(HTTPException) as exc:
         decode_access_token(token, _settings(NEW))
@@ -65,7 +66,7 @@ def test_rotation_without_previous_key_rejects_old_tokens() -> None:
 
 def test_unknown_kid_rejected_even_if_signature_matches_a_ring_key() -> None:
     forged = jwt.encode(_claims(), NEW, algorithm="HS256", headers={"kid": "deadbeefdeadbeef"})
-    with pytest.raises(JWTError):
+    with pytest.raises(InvalidTokenError):
         decode_jwt(forged, _settings(NEW, OLD))
     with pytest.raises(HTTPException):
         decode_access_token(forged, _settings(NEW, OLD))
@@ -74,14 +75,14 @@ def test_unknown_kid_rejected_even_if_signature_matches_a_ring_key() -> None:
 def test_kid_pins_the_key_no_fallback_to_others() -> None:
     # Signed with OLD but labelled with NEW's kid: must fail, not fall through.
     mislabelled = jwt.encode(_claims(), OLD, algorithm="HS256", headers={"kid": key_id_for_secret(NEW)})
-    with pytest.raises(JWTError):
+    with pytest.raises(InvalidTokenError):
         decode_jwt(mislabelled, _settings(NEW, OLD))
 
 
 def test_expired_token_is_not_retried_with_other_keys() -> None:
     now = datetime.now(UTC)
     expired = jwt.encode({"sub": "u", "exp": now - timedelta(minutes=1)}, NEW, algorithm="HS256")
-    with pytest.raises(JWTError, match="(?i)expired"):
+    with pytest.raises(InvalidTokenError, match="(?i)expired"):
         decode_jwt(expired, _settings(NEW, OLD))
 
 

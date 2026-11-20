@@ -5376,7 +5376,7 @@ export function BOQEditorPage() {
                 {t('boq.unlock', { defaultValue: 'Unlock' })}
               </Button>
             )}
-            {boq.is_locked && (
+            {boq.is_locked && isManager && (
               <Button variant="secondary" onClick={handleCreateBudget} disabled={createBudgetMutation.isPending}>
                 <Wallet size={14} className="mr-1" />
                 {t('boq.create_budget', { defaultValue: 'Create Budget' })}

@@ -157,7 +157,7 @@ async def test_issued_token_has_portal_scope(
     portal_chain,
 ):
     """Sanity: the JWT we mint carries ``scope='portal'`` + ``type='portal''``."""
-    from jose import jwt
+    import jwt
 
     from app.config import get_settings
 
@@ -828,7 +828,7 @@ async def test_verify_updates_last_used(client: AsyncClient, portal_chain):
 async def test_jwt_scope_tampering_rejected(client: AsyncClient):
     """A JWT minted with scope != 'portal' (e.g. a leaked access token)
     is rejected by /verify/ even though the signature is valid."""
-    from jose import jwt
+    import jwt
 
     from app.config import get_settings
 

@@ -123,7 +123,7 @@ async def _drain_events() -> None:
     raise AssertionError("event handlers did not settle")
 
 
-async def _login(client: AsyncClient) -> tuple[str, dict[str, str]]:
+async def _login(client: AsyncClient, role: str = "admin") -> tuple[str, dict[str, str]]:
     from sqlalchemy import update
 
     from app.database import async_session_factory
@@ -136,7 +136,7 @@ async def _login(client: AsyncClient) -> tuple[str, dict[str, str]]:
     )
     assert reg.status_code in (200, 201), reg.text
     async with async_session_factory() as s:
-        await s.execute(update(User).where(User.email == email.lower()).values(role="admin", is_active=True))
+        await s.execute(update(User).where(User.email == email.lower()).values(role=role, is_active=True))
         await s.commit()
     login = await client.post(f"{API}/users/auth/login", json={"email": email, "password": password})
     assert login.status_code == 200, login.text
@@ -230,7 +230,9 @@ async def _supplier(client: AsyncClient, h: dict[str, str]) -> str:
     return body["id"]
 
 
-async def _order(client: AsyncClient, h: dict[str, str], project_id: uuid.UUID, vendor: str) -> dict:
+async def _order(
+    client: AsyncClient, h: dict[str, str], project_id: uuid.UUID, vendor: str, currency: str = "EUR"
+) -> dict:
     po = await _ok(
         await client.post(
             f"{API}/procurement/",
@@ -239,7 +241,7 @@ async def _order(client: AsyncClient, h: dict[str, str], project_id: uuid.UUID, 
                 "vendor_contact_id": vendor,
                 "issue_date": "2026-09-01",
                 "delivery_date": "2026-09-20",
-                "currency_code": "EUR",
+                "currency_code": currency,
                 "amount_subtotal": "50000.00",
                 "tax_amount": "12500.00",
                 "amount_total": "62500.00",
@@ -934,3 +936,261 @@ async def test_a_subcontract_billed_through_a_payable_invoice_is_committed_and_i
     async with async_session_factory() as s:
         spine = (await s.execute(select(BudgetLine.actual_amount).where(BudgetLine.project_id == project_id))).all()
     assert sum((_money(row[0]) for row in spine), Decimal("0")) == Decimal("36000")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("currency", ["USD", "SLS"])
+async def test_demo_imported_bill_to_project_profit(client: AsyncClient, currency: str) -> None:
+    """Illustrative quantities, prices and contract amounts for a fictional project."""
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    _, h = await _login(client)
+    project = await _ok(
+        await client.post(
+            f"{API}/projects/",
+            headers=h,
+            json={
+                "name": f"Demo Hargeisa offices {uuid.uuid4().hex[:6]}",
+                "region": "Somaliland",
+                "currency": currency,
+            },
+        )
+    )
+    pid = uuid.UUID(project["id"])
+    bill = await _ok(
+        await client.post(f"{API}/boq/boqs/", headers=h, json={"project_id": str(pid), "name": "Demo BOQ"})
+    )
+    bill_url = f"{API}/boq/boqs/{bill['id']}"
+    book = Workbook()
+    book.active.append(["Position", "Description", "Unit", "Quantity", "Unit Rate"])
+    book.active.append(["02.001", "Demo reinforcement", "kg", 20000, 5])
+    payload = BytesIO()
+    book.save(payload)
+    imported = await _ok(
+        await client.post(
+            bill_url + "/import/auto/",
+            headers=h,
+            files={
+                "file": (
+                    "demo.xlsx",
+                    payload.getvalue(),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+    )
+    assert not imported.get("errors")
+    await _ok(await client.post(bill_url + "/lock/", headers=h))
+    budgets_url = f"{API}/finance/budgets/"
+    rows = (await _ok(await client.get(budgets_url, headers=h, params={"project_id": str(pid)})))["items"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert _money(row["original_budget"]) == Decimal("100000")
+    budget_url = budgets_url + row["id"]
+    report_url = f"{API}/finance/project-cost-report/?project_id={pid}"
+    report = await _ok(await client.get(report_url, headers=h))
+    assert report["currencies"][0]["forecast_status"] == "missing_forecast"
+    assert report["forecast_profit"] is None
+    denied = await client.patch(budget_url, headers=h, json={"original_budget": "1"})
+    assert denied.status_code == 409
+    await _ok(
+        await client.patch(
+            budget_url, headers=h, json={"forecast_final": "60000.25", "metadata": {"notes": "Demo forecast"}}
+        )
+    )
+    await _ok(await client.post(bill_url + "/create-budget/", headers=h))
+    vendor = await _supplier(client, h)
+    po = await _order(client, h, pid, vendor, currency)
+    before = (await _ok(await client.get(report_url, headers=h)))["currencies"][0]
+    assert _money(before["remaining_commitments"]) == 50000 and _money(before["actual_cost"]) == 0
+    await _issue_and_receive(client, h, po)
+
+    contracts_url = f"{API}/contracts/contracts/"
+    contract = await _ok(
+        await client.post(
+            contracts_url,
+            headers=h,
+            json={
+                "code": f"DEMO-{uuid.uuid4().hex[:8]}",
+                "contract_type": "lump_sum",
+                "project_id": str(pid),
+                "title": "Demonstration fixed-price client agreement",
+                "total_value": "80000.25",
+                "currency": currency,
+            },
+        )
+    )
+    assert (await _ok(await client.get(report_url, headers=h)))["contract_status"] == "missing"
+    await _ok(await client.post(contracts_url + contract["id"] + "/sign", headers=h))
+    report = await _ok(await client.get(report_url, headers=h))
+    cost = report["currencies"][0]
+    assert cost["forecast_status"] == "ready" and cost["currency"] == currency
+    for key, expected in {
+        "original_budget": "100000",
+        "budget_changes": "0",
+        "current_budget": "100000",
+        "actual_cost": "40000",
+        "remaining_commitments": "10000",
+        "cash_paid": "0",
+        "uncommitted_forecast": "10000.25",
+        "forecast_final_cost": "60000.25",
+        "budget_variance": "39999.75",
+    }.items():
+        assert isinstance(cost[key], str) and _money(cost[key]) == Decimal(expected), key
+    assert report["contract_currency"] == currency
+    assert _money(report["current_contract_value"]) == Decimal("80000.25")
+    assert _money(report["forecast_profit"]) == Decimal("20000") and _money(report["forecast_margin_pct"]) == 25
+
+    _, viewer = await _login(client, role="viewer")
+    assert (await client.get(report_url, headers=viewer)).status_code == 404
+    assert (await client.patch(budget_url, headers=viewer, json={"forecast_final": "1"})).status_code in {403, 404}
+    assert (await client.get(report_url)).status_code in {401, 403}
+
+    other = "USD" if currency == "SLS" else "SLS"
+    await _ok(
+        await client.post(
+            budgets_url,
+            headers=h,
+            json={
+                "project_id": str(pid),
+                "category": "labour",
+                "original_budget": "900719925474099.99",
+                "currency_code": other,
+                "forecast_final": "250.10",
+            },
+        )
+    )
+    mixed = await _ok(await client.get(report_url, headers=h))
+    assert {r["currency"] for r in mixed["currencies"]} == {"USD", "SLS"}
+    assert mixed["forecast_profit"] is None and mixed["forecast_margin_pct"] is None
+    foreign = next(r for r in mixed["currencies"] if r["currency"] == other)
+    assert foreign["original_budget"] == "900719925474099.99"
+
+
+@pytest.mark.asyncio
+async def test_approved_bill_freezes_its_currency_conversion_on_retry(client: AsyncClient) -> None:
+    """Synthetic exchange factors exercise the math only. No market rates are seeded."""
+    from sqlalchemy import update
+
+    from app.database import async_session_factory
+    from app.modules.boq.models import Position
+
+    owner, h = await _login(client)
+    pid, bid = await _seed_project_and_bill(owner)
+    async with async_session_factory() as session:
+        await session.execute(
+            update(Position).where(Position.boq_id == bid, Position.unit != "").values(metadata_={"currency": "SLS"})
+        )
+        await session.commit()
+    bill_url = f"{API}/boq/boqs/{bid}"
+    project_url = f"{API}/projects/{pid}"
+    blocked = await client.post(bill_url + "/lock/", headers=h)
+    assert blocked.status_code == 409 and "SLS" in blocked.text
+    assert not (await _ok(await client.get(bill_url, headers=h)))["is_locked"]
+    await _ok(await client.patch(project_url, headers=h, json={"fx_rates": [{"code": "SLS", "rate": "0.125"}]}))
+    await _ok(await client.post(bill_url + "/lock/", headers=h))
+    await _ok(await client.patch(project_url, headers=h, json={"fx_rates": [{"code": "SLS", "rate": "0.25"}]}))
+    await _ok(await client.post(bill_url + "/create-budget/", headers=h))
+    budgets = await _ok(await client.get(f"{API}/finance/budgets/?project_id={pid}", headers=h))
+    assert sum(_money(row["original_budget"]) for row in budgets["items"]) == Decimal("50000")
+    for row in budgets["items"]:
+        evidence = row["metadata"][f"boq_fx:{bid}"]
+        assert evidence["base_units_per_foreign_unit"] == {"SLS": "0.125"}
+        assert evidence["base_currency"] == "EUR" and evidence["approved_by"] == owner
+        assert evidence["approved_at"]
+
+
+@pytest.mark.asyncio
+async def test_company_membership_scopes_cost_report_and_budget_edits(client: AsyncClient) -> None:
+    _, admin = await _login(client)
+    entities = f"{API}/legal-entities/entities/"
+    members = []
+    for label in ("A", "B"):
+        company = await _ok(
+            await client.post(
+                entities,
+                headers=admin,
+                json={
+                    "code": "DEMO-" + uuid.uuid4().hex[:8],
+                    "name": "Demo company " + label,
+                    "country_code": "SO",
+                    "functional_currency": "SLS",
+                },
+            )
+        )
+        user_id, auth = await _login(client, role="viewer")
+        await _ok(
+            await client.post(
+                f"{entities}{company['id']}/members/",
+                headers=admin,
+                json={
+                    "user_id": user_id,
+                    "role": "viewer",
+                },
+            )
+        )
+        project = await _ok(
+            await client.post(
+                f"{API}/projects/",
+                headers=admin,
+                json={
+                    "name": "Demo company job " + uuid.uuid4().hex[:8],
+                    "currency": "SLS",
+                },
+            )
+        )
+        pid = project["id"]
+        await _ok(
+            await client.put(
+                f"{API}/legal-entities/projects/{pid}/entity",
+                headers=admin,
+                json={
+                    "legal_entity_id": company["id"],
+                },
+            )
+        )
+        budget = await _ok(
+            await client.post(
+                f"{API}/finance/budgets/",
+                headers=admin,
+                json={
+                    "project_id": pid,
+                    "category": "materials",
+                    "original_budget": "150.25",
+                },
+            )
+        )
+        members.append((auth, pid, budget["id"], company["id"]))
+    for index, (auth, pid, budget_id, company_id) in enumerate(members):
+        # The same memberships scope the company picker, details and personal roster.
+        visible = await _ok(await client.get(entities, headers=auth))
+        assert [record["id"] for record in visible["items"]] == [company_id]
+        state = await _ok(await client.get(f"{API}/legal-entities/ui-state", headers=auth))
+        assert state["active_entity_count"] == 1 and state["my_entity_ids"] == [company_id]
+        roster = await _ok(await client.get(f"{entities}{company_id}/members/", headers=auth))
+        assert len(roster["items"]) == 1
+        other_company = members[1 - index][3]
+        for suffix in ("", "/members/"):
+            assert (await client.get(f"{entities}{other_company}{suffix}", headers=auth)).status_code == 404
+        other = members[1 - index][1]
+        url = f"{API}/finance/project-cost-report/"
+        own = await _ok(await client.get(url, headers=auth, params={"project_id": pid}))
+        assert own["currencies"][0]["original_budget"] == "150.25"
+        bill = await _ok(
+            await client.post(
+                f"{API}/boq/boqs/",
+                headers=admin,
+                json={
+                    "project_id": pid,
+                    "name": "Demo baseline approval",
+                },
+            )
+        )
+        for action in ("lock", "unlock", "create-budget"):
+            assert (await client.post(f"{API}/boq/boqs/{bill['id']}/{action}/", headers=auth)).status_code == 403
+        assert (await client.get(url, headers=auth, params={"project_id": other})).status_code == 404
+        assert (
+            await client.patch(f"{API}/finance/budgets/{budget_id}", headers=auth, json={"forecast_final": "1"})
+        ).status_code == 403

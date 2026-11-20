@@ -12,7 +12,7 @@ Sources (MF, https://github.com/CIRFMF/ksef-docs, read 2026-10-19):
   ``RSA-OAEP-SHA256("{token}|{timestampMs}")`` under the key published for
   ``KsefTokenEncryption``, Base64.
 
-``cryptography`` is already a core dependency (through ``python-jose``), so this
+``cryptography`` is already a core dependency (through ``PyJWT[crypto]``), so this
 adds none.
 """
 

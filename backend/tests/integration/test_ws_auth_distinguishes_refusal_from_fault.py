@@ -50,7 +50,7 @@ def _well_formed_token() -> str:
     It has to be genuinely valid, or the request never reaches re-hydration and
     the test would be asserting the outage path while exercising the decode one.
     """
-    from jose import jwt
+    import jwt
 
     settings = get_settings()
     return jwt.encode(

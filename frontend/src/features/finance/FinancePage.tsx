@@ -105,6 +105,7 @@ import { IssueDocumentButton } from '@/features/doc-templates/IssueDocumentButto
 import { PURCHASING_DOCUMENT_LOCALES } from '@/shared/lib/documentExport';
 import { RecordPdfButton } from '@/shared/ui/RegisterExport';
 import { financeGuide } from './financeGuide';
+import { ProjectCostReport } from './ProjectCostReport';
 import { DEFAULT_FINANCE_TAB, isFinanceTab, type FinanceTab } from './financeTabs';
 import { UnlinkedTwinBanner } from '@/features/subcontractors/UnlinkedTwinBanner';
 import { fmtList, fmtPercent, fmtFixed, fmtNumberForInput } from '@/shared/lib/formatters';
@@ -330,7 +331,7 @@ const COMMON_CURRENCIES = [
   // the picker still allowed entering BRL via the project-currency
   // injection below, but having it in the shortlist saves the click and
   // signals first-class support.
-  'EUR', 'USD', 'GBP', 'CHF', 'BRL', 'PLN', 'CZK', 'SEK', 'NOK', 'DKK', 'AED', 'SAR',
+  'EUR', 'USD', 'SLS', 'GBP', 'CHF', 'BRL', 'PLN', 'CZK', 'SEK', 'NOK', 'DKK', 'AED', 'SAR',
 ] as const;
 
 function currencyOptions(active: string): string[] {
@@ -983,6 +984,7 @@ export function FinancePage() {
       label: t('finance.budgets', { defaultValue: 'Budgets' }),
       icon: <Wallet size={16} />,
     },
+    { key: 'cost_control', label: t('title', { ns: 'costReport' }), icon: <BarChart3 size={16} /> },
     {
       key: 'invoices',
       label: t('finance.invoices', { defaultValue: 'Invoices' }),
@@ -1120,8 +1122,8 @@ export function FinancePage() {
           the single global project selector is the one source of truth, so
           there is no duplicate amber banner here (audit: finance-top). */}
 
-      {/* Summary Cards */}
-      {projectId && (
+      {/* The cost-control report presents original currencies and its own forecast. */}
+      {projectId && activeTab !== 'cost_control' && (
         <FinanceSummaryCards
           projectId={projectId}
           onGoToBudgets={() => setActiveTab('budgets')}
@@ -1151,6 +1153,7 @@ export function FinancePage() {
           id={tabIds('finance').panelId(activeTab)}
           aria-labelledby={tabIds('finance').tabId(activeTab)}
         >
+          {projectId && activeTab === 'cost_control' && <ProjectCostReport projectId={projectId} />}
           {projectId && activeTab === 'budgets' && <BudgetsTab projectId={projectId} />}
           {projectId && activeTab === 'invoices' && <InvoicesTab projectId={projectId} />}
           {projectId && activeTab === 'inbox' && <InvoiceInboxTab projectId={projectId} />}
@@ -1181,7 +1184,7 @@ export function FinancePage() {
 
 /* ── Budgets Tab ──────────────────────────────────────────────────────── */
 
-const INITIAL_BUDGET_FORM = { wbs_code: '', category: '', original_budget: '', notes: '' };
+const INITIAL_BUDGET_FORM = { wbs_code: '', category: '', original_budget: '', forecast_final: '', notes: '' };
 
 function BudgetsTab({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
@@ -1213,6 +1216,7 @@ function BudgetsTab({ projectId }: { projectId: string }) {
   const [budgetErrors, setBudgetErrors] = useState<Record<string, string>>({});
   const budgetFirstRef = useRef<HTMLInputElement>(null);
   const isEditingBudget = editing !== null;
+  const fromApprovedBill = Object.keys(editing?.metadata ?? {}).some((key) => key === 'boq_id' || key.startsWith('from_boq:'));
 
   // Auto-focus budget WBS input when modal opens (create or edit)
   useEffect(() => {
@@ -1233,6 +1237,7 @@ function BudgetsTab({ projectId }: { projectId: string }) {
       category: b.category ?? '',
       original_budget:
         b.original_budget != null ? String(b.original_budget) : '',
+      forecast_final: String(b.forecast_final ?? ''),
       notes,
     });
     setBudgetErrors({});
@@ -1246,13 +1251,13 @@ function BudgetsTab({ projectId }: { projectId: string }) {
     setBudgetErrors({});
   };
 
-  const canSubmitBudget = budgetForm.category.trim().length > 0 && budgetForm.original_budget.trim().length > 0 && parseFloat(budgetForm.original_budget) > 0;
+  const canSubmitBudget = budgetForm.category.trim().length > 0 && budgetForm.original_budget.trim().length > 0 && (parseFloat(budgetForm.original_budget) > 0 || (isEditingBudget && Number(budgetForm.original_budget) === 0));
 
   const validateBudget = (): boolean => {
     const e: Record<string, string> = {};
     if (!budgetForm.category.trim()) e.category = t('validation.required', { defaultValue: 'This field is required' });
     if (!budgetForm.original_budget.trim()) e.original_budget = t('validation.required', { defaultValue: 'This field is required' });
-    else if (parseFloat(budgetForm.original_budget) <= 0) e.original_budget = t('validation.positive_number', { defaultValue: 'Must be a positive number' });
+    else if (Number(budgetForm.original_budget) < 0 || (!isEditingBudget && Number(budgetForm.original_budget) === 0)) e.original_budget = t('validation.positive_number', { defaultValue: 'Must be a positive number' });
     setBudgetErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -1272,16 +1277,18 @@ function BudgetsTab({ projectId }: { projectId: string }) {
   }, [showCreate, showImport, isEditingBudget]);
 
   const createBudgetMut = useMutation({
-    mutationFn: (data: { wbs_id: string | null; category: string | null; original_budget: string; notes: string | null }) =>
+    mutationFn: (data: { wbs_id: string | null; category: string | null; original_budget: string; forecast_final: string; notes: string | null }) =>
       apiPost('/v1/finance/budgets/', {
         project_id: projectId,
         wbs_id: data.wbs_id,
         category: data.category,
         original_budget: data.original_budget,
+        forecast_final: data.forecast_final || '0',
         notes: data.notes || undefined,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['finance-budgets', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['finance', 'project-cost-report', projectId] });
       // The summary cards (Total Budget / Remaining / consumed %) read the
       // dashboard query, so refresh it too - otherwise the top cards stay
       // stale after adding a budget line while the table below updates.
@@ -1303,6 +1310,7 @@ function BudgetsTab({ projectId }: { projectId: string }) {
       wbs_id: string | null;
       category: string | null;
       original_budget: string;
+      forecast_final: string;
       notes: string | null;
       existingMetadata: Record<string, unknown> | null;
     }) =>
@@ -1310,6 +1318,7 @@ function BudgetsTab({ projectId }: { projectId: string }) {
         wbs_id: data.wbs_id,
         category: data.category,
         original_budget: data.original_budget,
+        forecast_final: data.forecast_final || '0',
         metadata: {
           ...(data.existingMetadata ?? {}),
           ...(data.notes != null ? { notes: data.notes } : {}),
@@ -1317,6 +1326,7 @@ function BudgetsTab({ projectId }: { projectId: string }) {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['finance-budgets', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['finance', 'project-cost-report', projectId] });
       queryClient.invalidateQueries({ queryKey: ['finance', 'dashboard', projectId] });
       closeBudgetModal();
       addToast({ type: 'success', title: t('finance.budget_updated', { defaultValue: 'Budget line updated successfully' }) });
@@ -1357,6 +1367,7 @@ function BudgetsTab({ projectId }: { projectId: string }) {
       const res = await importBudgetsFile(importFile, projectId);
       setImportResult(res);
       queryClient.invalidateQueries({ queryKey: ['finance-budgets', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['finance', 'project-cost-report', projectId] });
       // The summary cards read the dashboard query, so an import that adds or
       // updates budget lines must refresh it too - otherwise the top totals
       // stay stale until a manual page reload.
@@ -1389,6 +1400,7 @@ function BudgetsTab({ projectId }: { projectId: string }) {
         wbs_id: budgetForm.wbs_code || null,
         category: budgetForm.category,
         original_budget: budgetForm.original_budget,
+        forecast_final: budgetForm.forecast_final,
         notes: budgetForm.notes || null,
         existingMetadata:
           editing.metadata && typeof editing.metadata === 'object'
@@ -1400,6 +1412,7 @@ function BudgetsTab({ projectId }: { projectId: string }) {
         wbs_id: budgetForm.wbs_code || null,
         category: budgetForm.category,
         original_budget: budgetForm.original_budget,
+        forecast_final: budgetForm.forecast_final,
         notes: budgetForm.notes || null,
       });
     }
@@ -1455,6 +1468,7 @@ function BudgetsTab({ projectId }: { projectId: string }) {
             {BUDGET_CATEGORIES.map((cat) => (
               <button
                 key={cat.key}
+                disabled={fromApprovedBill}
                 type="button"
                 onClick={() => {
                   setBudgetForm((p) => ({ ...p, category: cat.key }));
@@ -1475,6 +1489,7 @@ function BudgetsTab({ projectId }: { projectId: string }) {
 
         <WideModalField label={t('finance.wbs', { defaultValue: 'WBS Code' })}>
           <input
+            readOnly={fromApprovedBill}
             ref={budgetFirstRef}
             value={budgetForm.wbs_code}
             onChange={(e) => setBudgetForm((p) => ({ ...p, wbs_code: e.target.value }))}
@@ -1502,6 +1517,7 @@ function BudgetsTab({ projectId }: { projectId: string }) {
             <input
               type="number"
               step="0.01"
+              readOnly={fromApprovedBill}
               value={budgetForm.original_budget}
               onChange={(e) => {
                 setBudgetForm((p) => ({ ...p, original_budget: e.target.value }));
@@ -1512,6 +1528,12 @@ function BudgetsTab({ projectId }: { projectId: string }) {
               placeholder="0.00"
             />
           </div>
+        </WideModalField>
+
+        <WideModalField label={t('forecast_final_cost', { ns: 'costReport' })}>
+          <input type="number" step="0.01" min="0" value={budgetForm.forecast_final}
+            onChange={(e) => setBudgetForm((p) => ({ ...p, forecast_final: e.target.value }))}
+            className={inputCls} />
         </WideModalField>
 
         <WideModalField

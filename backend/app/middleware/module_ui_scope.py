@@ -39,9 +39,9 @@ def token_scope(authorization: str | None) -> str | None:
     if not authorization or not authorization.lower().startswith("bearer "):
         return None
     try:
-        from jose import jwt
+        import jwt
 
-        claims: dict[str, Any] = jwt.get_unverified_claims(authorization[7:].strip())
+        claims: dict[str, Any] = jwt.decode(authorization[7:].strip(), options={"verify_signature": False})
     except Exception:
         return None
     value = claims.get(SCOPE_CLAIM)

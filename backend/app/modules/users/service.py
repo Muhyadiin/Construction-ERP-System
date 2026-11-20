@@ -671,12 +671,12 @@ class UserService:
         Following a link twice is harmless. A link never reactivates an account
         that has been in use and was switched off since.
         """
-        from jose import JWTError
+        from jwt import InvalidTokenError
 
         invalid = HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired confirmation link")
         try:
             payload = decode_jwt(token, self.settings)
-        except JWTError as exc:
+        except InvalidTokenError as exc:
             raise invalid from exc
         if payload.get("type") != "verify_email" or not payload.get("sub"):
             raise invalid
@@ -1150,11 +1150,11 @@ class UserService:
 
         Raises HTTPException 401 if refresh token is invalid.
         """
-        from jose import JWTError
+        from jwt import InvalidTokenError
 
         try:
             payload = decode_jwt(refresh_token, self.settings)
-        except JWTError as exc:
+        except InvalidTokenError as exc:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid refresh token",
@@ -1282,11 +1282,11 @@ class UserService:
         blocklist is needed; the existing ``password_changed_at`` column
         already serves as the invalidation timestamp.
         """
-        from jose import JWTError
+        from jwt import InvalidTokenError
 
         try:
             payload = decode_jwt(data.token, self.settings)
-        except JWTError as exc:
+        except InvalidTokenError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid or expired reset token",

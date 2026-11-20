@@ -1,0 +1,98 @@
+name: Publish Kobci Windows preview
+on:
+  push:
+    branches: [publish/kobci-windows-preview-1]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kobci-windows-preview-1
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'Muhyadiin/Construction-ERP-System' && github.ref == 'refs/heads/publish/kobci-windows-preview-1'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch the tested server from the build before CAD converters were bundled
+        working-directory: desktop/kobci-windows
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNTIME: c48ba24de230a3a59f1d490fbd77eb3a016fdbc7
+        run: |
+          set -euo pipefail
+          git diff --exit-code "$RUNTIME" "$GITHUB_SHA" -- ':(top)**' ':(top,exclude)backend/tests/**' ':(top,exclude)desktop/kobci-windows/**' ':(top,exclude)docs/kobci/**' ':(top,exclude).github/workflows/kobci-windows-preview.yml'
+          metadata=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/14614632426")
+          echo "$metadata" | jq -e --arg sha "$RUNTIME" '.expired == false and .workflow_run.id == 44702777534 and .workflow_run.head_sha == $sha and .name == ("sidecar-x86_64-pc-windows-msvc-" + $sha + "-1")'
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/14614632426/zip" > sidecar.zip
+          python prepare.py
+      - name: Build the per-user installer
+        working-directory: desktop/kobci-windows
+        shell: pwsh
+        run: |
+          $compiler = Join-Path ${env:ProgramFiles(x86)} 'NSIS/makensis.exe'
+          if (!(Test-Path $compiler)) {
+            choco install nsis --version=3.11 -y --no-progress
+            if ($LASTEXITCODE) { throw 'NSIS installation failed' }
+          }
+          & $compiler /V2 installer.nsi
+          if ($LASTEXITCODE) { throw 'NSIS failed' }
+      - name: Install and start the packaged ERP
+        shell: pwsh
+        run: ./desktop/kobci-windows/check-install.ps1
+      - name: Prepare the tested downloads
+        working-directory: desktop/kobci-windows
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir release-files
+          mv Kobci-Construction-ERP-Windows-x64-Preview-1.exe release-files/
+          python -c "from pathlib import Path; import shutil; ui, = Path('payload/server').rglob('_frontend_dist'); assert (ui / 'index.html').is_file(); shutil.make_archive('release-files/Kobci-ERP-web-ui', 'zip', ui)"
+          cd release-files
+          sha256sum *.exe *.zip > SHA256SUMS.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: verified-kobci-windows-preview
+          path: desktop/kobci-windows/release-files/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: verified-kobci-windows-preview
+          path: downloads
+      - name: Publish tested files and corresponding source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: kobci-windows-preview-1
+        run: |
+          set -euo pipefail
+          cd downloads
+          sha256sum --check SHA256SUMS.txt
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --prerelease --latest=false --title "Kobci Construction ERP — Windows community preview 1" \
+            --notes-file ../desktop/kobci-windows/README.md \
+            Kobci-Construction-ERP-Windows-x64-Preview-1.exe Kobci-ERP-web-ui.zip SHA256SUMS.txt

@@ -12,9 +12,9 @@ from collections.abc import Iterable
 from typing import Any
 
 import httpx
+import jwt
 from fastapi import HTTPException, status
-from jose import jwt
-from jose.exceptions import JOSEError
+from jwt import PyJWTError
 
 VALID_ROLES = ("admin", "manager", "editor", "viewer")
 _CACHE_TTL_S = 3600.0
@@ -72,6 +72,9 @@ async def get_jwks(jwks_uri: str, *, refresh: bool = False) -> dict[str, Any]:
         jwks = await _get_json(jwks_uri)
     except httpx.HTTPError as exc:
         raise oidc_error(status.HTTP_502_BAD_GATEWAY, "provider_unreachable", "Could not fetch provider keys.") from exc
+    keys = jwks.get("keys") if isinstance(jwks, dict) else None
+    if not isinstance(keys, list) or not all(isinstance(key, dict) for key in keys):
+        raise oidc_error(status.HTTP_502_BAD_GATEWAY, "provider_invalid", "Invalid provider key set.")
     _jwks_cache[jwks_uri] = (time.monotonic(), jwks)
     return jwks
 
@@ -87,29 +90,39 @@ async def verify_id_token(
     invalid = oidc_error(status.HTTP_401_UNAUTHORIZED, "invalid_id_token", "ID token verification failed.")
     try:
         header = jwt.get_unverified_header(id_token)
-    except JOSEError as exc:
+    except PyJWTError as exc:
         raise invalid from exc
     alg = header.get("alg", "")
-    if not alg or alg == "none" or alg.startswith("HS"):
+    if alg not in ("RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512"):
         raise invalid
     jwks = await get_jwks(discovery["jwks_uri"])
     kid = header.get("kid")
     if kid and not any(k.get("kid") == kid for k in jwks.get("keys", [])):
         jwks = await get_jwks(discovery["jwks_uri"], refresh=True)  # provider rotated keys
     keys = [k for k in jwks.get("keys", []) if not kid or k.get("kid") == kid]
-    if not keys:
+    for key in keys:
+        if key.get("use", "sig") != "sig" or key.get("alg", alg) != alg:
+            continue
+        if key.get("kty") != ("EC" if alg.startswith("ES") else "RSA"):
+            continue
+        key_ops = key.get("key_ops", ["verify"])
+        if not isinstance(key_ops, list) or "verify" not in key_ops:
+            continue
+        try:
+            public_key = jwt.PyJWK.from_dict(key, algorithm=alg)
+            claims = jwt.decode(
+                id_token,
+                public_key,
+                algorithms=[alg],
+                audience=client_id,
+                issuer=discovery["issuer"],
+                options={"require": ["exp", "iat", "sub", "iss", "aud"]},
+            )
+        except (PyJWTError, ValueError, TypeError):
+            continue
+        break
+    else:
         raise invalid
-    try:
-        claims = jwt.decode(
-            id_token,
-            {"keys": keys},
-            algorithms=[alg],
-            audience=client_id,
-            issuer=discovery["issuer"],
-            options={"verify_at_hash": False},
-        )
-    except JOSEError as exc:
-        raise invalid from exc
     if not nonce or claims.get("nonce") != nonce:
         raise invalid
     return claims

@@ -1565,10 +1565,44 @@ jobs:
           if ($installers.Count -eq 0) { throw 'NSIS installer missing' }
           $sidecar = Get-Item -LiteralPath desktop/src-tauri/binaries/server/openconstructionerp-server.exe
           $files = @($installers) + @($sidecar)
-          $fingerprints = @($files | ForEach-Object { @{ name = $_.Name; bytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } })
+          $fingerprints = @($files | ForEach-Object {
+            $signature = Get-AuthenticodeSignature -LiteralPath $_.FullName
+            @{
+              name = $_.Name
+              bytes = $_.Length
+              sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              authenticode = $signature.Status.ToString()
+              publisher = $signature.SignerCertificate.Subject
+            }
+          })
           $manifest = @{ purpose = 'diagnostic-only; not a published update'; source_sha = $actual; run_id = '${{ github.run_id }}'; run_attempt = '${{ github.run_attempt }}'; version = (Get-Content desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version; files = $fingerprints }
           $manifest | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 desktop/src-tauri/target/release/bundle/nsis/diagnostic-manifest.json
           "Diagnostic source: $actual. Product version unchanged; not published to releases or update feeds." >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Test the diagnostic installer on the Windows runner
+        if: inputs.build_only_windows
+        timeout-minutes: 15
+        shell: pwsh
+        run: |
+          $bundle = 'desktop/src-tauri/target/release/bundle/nsis'
+          $installers = @(Get-ChildItem -LiteralPath $bundle -Filter '*.exe')
+          if ($installers.Count -ne 1) { throw 'Expected one diagnostic installer' }
+          $status = (Get-AuthenticodeSignature -LiteralPath $installers[0].FullName).Status.ToString()
+          "Installer Authenticode status: $status" >> $env:GITHUB_STEP_SUMMARY
+          if ($status -notin @('Valid', 'NotSigned')) { throw "Invalid installer signature: $status" }
+          $install = Start-Process -FilePath $installers[0].FullName -ArgumentList '/S', '/NS' -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installation failed with exit code $($install.ExitCode)" }
+          $config = Get-Content desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $directory = Join-Path $env:ProgramFiles $config.productName
+          Get-Item -LiteralPath (Join-Path $directory "$($config.mainBinaryName).exe") -ErrorAction Stop
+          $server = Get-Item -LiteralPath (Join-Path $directory 'server/openconstructionerp-server.exe') -ErrorAction Stop
+          $manifest = Get-Content (Join-Path $bundle 'diagnostic-manifest.json') -Raw | ConvertFrom-Json
+          $expected = @($manifest.files | Where-Object name -eq $server.Name)
+          if ($expected.Count -ne 1 -or (Get-FileHash $server.FullName).Hash -ne $expected[0].sha256) {
+            throw 'Installed server differs from the tested sidecar'
+          }
+          & $server.FullName --version
+          if ($LASTEXITCODE -ne 0) { throw 'Installed server version check failed' }
 
       - name: Upload Windows diagnostic installer
         if: inputs.build_only_windows

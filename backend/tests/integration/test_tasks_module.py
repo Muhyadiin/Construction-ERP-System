@@ -88,7 +88,7 @@ async def auth(client: AsyncClient) -> dict[str, str]:
 
 @pytest_asyncio.fixture(scope="module")
 async def user_id(auth: dict[str, str]) -> str:
-    from jose import jwt
+    import jwt
 
     from app.config import get_settings
 

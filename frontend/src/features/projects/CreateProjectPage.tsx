@@ -310,6 +310,7 @@ export const CURRENCY_GROUPS: OptionGroup[] = [
       { value: 'GHS', label: 'GHS (GH₵) - Ghanaian Cedi' },
       { value: 'TZS', label: 'TZS (TSh) - Tanzanian Shilling' },
       { value: 'UGX', label: 'UGX (USh) - Ugandan Shilling' },
+      { value: 'SLS', label: 'SL SH - Somaliland shilling' },
       { value: 'ETB', label: 'ETB (Br) - Ethiopian Birr' },
     ],
   },
