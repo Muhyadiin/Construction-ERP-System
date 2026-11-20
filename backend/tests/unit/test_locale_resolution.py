@@ -12,8 +12,8 @@ The red proof is the reason to believe any of it. Rather than a synthetic
 fixture, it loads the three catalogues that actually carried this defect as
 they stood before 341d37ca7 fixed them, and requires the lock to flag all
 three and to clear all three post-fix versions. Those are the exact defects it
-exists to catch, so passing against them is evidence and not decoration. Both
-backend lanes check out with fetch-depth 0, so the history is present in CI.
+exists to catch, so passing against them is evidence and not decoration. The
+pre-fix sources and their upstream revision links live under tests/fixtures/kobci_upstream.
 
 Every one of these red proofs failed at least once while being written, which
 is the only reason they are trusted: the ownership filter compared against a
@@ -38,7 +38,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _SCRIPT = _REPO_ROOT / "scripts" / "check_locale_resolution.py"
 
 #: The commit that fixed all three, and the files it fixed.
-_FIX_COMMIT = "341d37ca7"
+_FIXTURES = _REPO_ROOT / "backend/tests/fixtures/kobci_upstream"
 _HISTORICAL = {
     "requirements": "backend/app/modules/requirements/intl.py",
     "risk": "backend/app/modules/risk/intl.py",
@@ -56,21 +56,6 @@ def _load_gate():
 
 gate = _load_gate()
 gate.prepare_environment()
-
-
-def _git_show(revision: str, path: str) -> str:
-    result = subprocess.run(
-        ["git", "show", f"{revision}:{path}"],
-        cwd=_REPO_ROOT,
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    assert result.returncode == 0, (
-        f"cannot read {path} at {revision} - this red proof needs real history "
-        f"(both backend lanes check out with fetch-depth 0):\n{result.stderr}"
-    )
-    return result.stdout
 
 
 def _probe_source(name: str, source: str, workdir: Path) -> dict:
@@ -118,7 +103,8 @@ def test_lock_flags_the_catalogue_as_it_was_before_the_fix(name: str, tmp_path: 
     while holding a complete translation for its base language. If the lock
     cannot see them it cannot see the next one either.
     """
-    source = _git_show(f"{_FIX_COMMIT}^", _HISTORICAL[name])
+    fixture = "bcf-messages.txt" if name == "bcf" else f"{name}-intl.txt"
+    source = (_FIXTURES / fixture).read_text(encoding="utf-8")
     result = _probe_source(name, source, tmp_path / "pre")
 
     assert result["status"] == "probed", (
@@ -135,7 +121,7 @@ def test_lock_clears_the_catalogue_as_it_stands_today(name: str, tmp_path: Path)
     Without this, a lock that flagged everything would pass the test above and
     still be worthless.
     """
-    source = _git_show("HEAD", _HISTORICAL[name])
+    source = (_REPO_ROOT / _HISTORICAL[name]).read_text(encoding="utf-8")
     result = _probe_source(name, source, tmp_path / "post")
 
     assert result["status"] == "probed", f"the current {name} catalogue could not be probed ({result['status']})"

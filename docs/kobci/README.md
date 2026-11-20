@@ -142,9 +142,9 @@ npm run typecheck
 | Related workflows | 114 tests passed for critical workflows, tasks and cost calculations. All 25 contingency tests passed, including retention of cost-reconciliation markers when a user clears budget notes. |
 | Backup and recovery | 37 tests passed for exports, file handling, transfer between accounts and scoped restore using isolated test data. A representative full-machine disaster-recovery exercise remains open. |
 | Desktop packaging | All 23 workflow and packaging unit tests passed locally. Windows acceptance is tracked by the diagnostic build on the review branch. |
-| Local deployment configuration | Compose configuration validated with loopback binding. Windows installer and production deployment remain pending. |
+| Local deployment configuration | Compose configuration validated with loopback binding. The Windows diagnostic installer passed on a clean runner. Public preview packaging and production acceptance are separate checks. |
 
-The fork starts from a source snapshot. Six inherited regression checks compare generated PDFs and translation catalogues with Git revisions that predate that snapshot. They require the upstream history to supply their comparison inputs. Tests used isolated Linux QA infrastructure. PDF and Excel checks exercised the existing contract exports. The new cost report currently renders in the application.
+The fork starts from a source snapshot. Six regression checks compare generated PDFs and translation catalogues with the original pre-fix upstream sources. The repository includes the reference files and their exact revisions so these tests also run in a source archive. Tests used isolated Linux QA infrastructure. PDF and Excel checks exercised the existing contract exports. The new cost report currently renders in the application.
 
 ## Security, dependencies and licence
 
@@ -153,6 +153,8 @@ Company directory reads now enforce membership. Platform administrators can see 
 The Windows desktop Python lockfile now uses PyJWT with cryptography. This removes `python-jose` and `ecdsa`, both of which had published advisories. A check of all 121 updated Python pins against PyPI found zero active advisories. The npm production audit likewise reported zero known vulnerabilities. These checks apply to this revision. Older installers have their own dependency sets. [Prior python-jose advisory](https://github.com/advisories/GHSA-3qf3-8w2g-rqmx) · [Prior ecdsa advisory](https://github.com/advisories/GHSA-wj6h-64fc-37mp)
 
 The desktop Rust lockfile was checked against OSV after updating certificate verification (rustls-webpki), Tokio and rustix. Eight crates still carry maintenance notices. Tauri's GTK3 dependency also retains a glib memory-safety advisory on Linux. Windows uses WebView2 and does not link GTK3. [glib advisory](https://rustsec.org/advisories/RUSTSEC-2024-0429.html)
+
+The Kobci Windows preview uses the previously tested server and browser interface, with a per-user launcher and no bundled proprietary CAD converter. Obtain optional converters directly from the publisher under their use and redistribution terms. [Windows installation and corresponding source](../../desktop/kobci-windows/README.md)
 
 Windows acceptance requires an installer built from the reviewed commit. The diagnostic workflow exercises the frozen server on Windows, records SHA-256 fingerprints and Authenticode status, and checks installation on a fresh Windows runner. Verify the publisher and installer fingerprint before installing on a workstation. A missing or untrusted publisher signature remains a distribution concern.
 
