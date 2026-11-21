@@ -47,14 +47,19 @@ function Inspect-Window($mode) {
 
 # Exercise the failure that a shortcut to the console server used to hide.
 # Only substitute the runner's pristine installed test binary, then restore it.
-$fixture = "$env:RUNNER_TEMP/SimulatedServerExit.cs"
-Set-Content $fixture 'class ExitServer { static int Main() { System.Console.Error.WriteLine("Simulated startup failure"); return 23; } }'
-Move-Item $server "$server.saved"
+$fixtureDir = New-Item -Path (Join-Path $env:RUNNER_TEMP 'kobci-fixture') -ItemType Directory -Force
+Push-Location $fixtureDir.FullName
 try {
-    & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /nologo "/out:$server" $fixture
+    Set-Content -LiteralPath 'SimulatedServerExit.cs' -Value 'class ExitServer { static int Main() { System.Console.Error.WriteLine("Simulated startup failure"); return 23; } }'
+    & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /nologo /out:SimulatedServerExit.exe SimulatedServerExit.cs
     if ($LASTEXITCODE) { throw 'Could not compile the test fixture' }
+} finally { Pop-Location }
+Move-Item -LiteralPath $server -Destination "$server.saved"
+try {
+    Copy-Item -LiteralPath (Join-Path $fixtureDir.FullName 'SimulatedServerExit.exe') -Destination $server
     Inspect-Window failure
 } finally {
-    Move-Item "$server.saved" $server -Force
+    if (Test-Path -LiteralPath $server) { Remove-Item -LiteralPath $server }
+    Move-Item -LiteralPath "$server.saved" -Destination $server
 }
 Inspect-Window success

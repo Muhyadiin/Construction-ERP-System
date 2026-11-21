@@ -37,7 +37,7 @@ jobs:
           echo "$metadata" | jq -e --arg sha "$RUNTIME" '.expired == false and .workflow_run.id == 44702777534 and .workflow_run.head_sha == $sha and .name == ("sidecar-x86_64-pc-windows-msvc-" + $sha + "-1")'
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/14614632426/zip" > sidecar.zip
           python prepare.py
-      - name: Build the native Kobci window and verify the Microsoft WebView2 bootstrapper
+      - name: Build the native Kobci window and verify the Microsoft offline WebView2 runtime
         shell: pwsh
         run: ./desktop/kobci-windows/build-desktop.ps1
       - name: Build the per-user installer
@@ -51,10 +51,7 @@ jobs:
           }
           & $compiler /V2 installer.nsi
           if ($LASTEXITCODE) { throw 'NSIS failed' }
-      - name: Install and start the packaged ERP
-        shell: pwsh
-        run: ./desktop/kobci-windows/check-install.ps1
-      - name: Prepare the tested downloads
+      - name: Prepare downloads for acceptance testing
         working-directory: desktop/kobci-windows
         shell: bash
         run: |
@@ -66,36 +63,116 @@ jobs:
           sha256sum *.exe *.zip > SHA256SUMS.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: verified-kobci-windows-preview
+          name: kobci-windows-candidate
           path: desktop/kobci-windows/release-files/
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
 
-  publish:
+  acceptance:
     needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: write
+    runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: verified-kobci-windows-preview
+          name: kobci-windows-candidate
+          path: desktop/kobci-windows
+      - name: Upgrade Preview 1 and open the actual installed desktop
+        shell: pwsh
+        run: ./desktop/kobci-windows/check-install.ps1
+
+  publish:
+    needs: acceptance
+    runs-on: windows-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      attestations: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: kobci-windows-candidate
           path: downloads
-      - name: Publish tested files and corresponding source
+      - name: Verify the tested bytes and tag their source
         shell: bash
+        working-directory: downloads
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: kobci-windows-preview-2
         run: |
           set -euo pipefail
-          cd downloads
           sha256sum --check SHA256SUMS.txt
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" > /dev/null 2>&1; then
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" > /dev/null
+          fi
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha)" = "$GITHUB_SHA"
+      - name: Select the available publisher identity
+        id: publisher
+        shell: pwsh
+        env:
+          SIGNING_FIELDS: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT != '' }} ${{ secrets.ARTIFACT_SIGNING_ACCOUNT != '' }} ${{ secrets.ARTIFACT_SIGNING_PROFILE != '' }} ${{ secrets.ARTIFACT_SIGNING_TENANT_ID != '' }} ${{ secrets.ARTIFACT_SIGNING_CLIENT_ID != '' }} ${{ secrets.ARTIFACT_SIGNING_CLIENT_SECRET != '' }}
+          REQUIRED: ${{ vars.WINDOWS_SIGNING_REQUIRED }}
+        run: |
+          $fields = @($env:SIGNING_FIELDS.Split(' ') | Where-Object { $_ -eq 'true' })
+          if ($fields.Count -gt 0 -and $fields.Count -lt 6) { throw 'The repository publisher profile is incomplete.' }
+          $enabled = $fields.Count -eq 6
+          if (!$enabled -and $env:REQUIRED -eq 'true') { throw 'This repository requires a Windows publisher profile.' }
+          "enabled=$($enabled.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          Write-Host "Windows publisher profile available: $enabled"
+      - name: Sign the tested installer with the configured Microsoft publisher
+        if: steps.publisher.outputs.enabled == 'true'
+        uses: azure/artifact-signing-action@b443cf8ea4124818d2ea9f043cba29fc3ec47b16
+        with:
+          azure-tenant-id: ${{ secrets.ARTIFACT_SIGNING_TENANT_ID }}
+          azure-client-id: ${{ secrets.ARTIFACT_SIGNING_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.ARTIFACT_SIGNING_CLIENT_SECRET }}
+          endpoint: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.ARTIFACT_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\downloads
+          files-folder-filter: exe
+      - name: Verify Windows signature and prepare final release notes
+        shell: pwsh
+        env:
+          SIGNED: ${{ steps.publisher.outputs.enabled }}
+        run: |
+          $installer = Get-Item 'downloads/Kobci-Construction-ERP-Windows-x64-Preview-2.exe'
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
+          if ($env:SIGNED -eq 'true') {
+            if ($signature.Status -ne 'Valid') { throw 'Windows publisher signature did not validate.' }
+            $notice = 'Windows verified the Authenticode signature on this installer. Publisher: ' + $signature.SignerCertificate.Subject
+          } else {
+            if ($signature.Status -ne 'NotSigned') { throw 'Unexpected publisher status on the tested build.' }
+            $notice = 'The Kobci setup file has no Windows Authenticode publisher signature. Windows may display Unknown publisher. Keep SmartScreen enabled.'
+          }
+          $notes = Get-Content -LiteralPath 'desktop/kobci-windows/README.md' -Raw
+          $notes.Replace('The release notes report the Windows publisher signature status of the downloadable installer.', $notice) | Set-Content 'release-notes.md' -Encoding utf8
+      - name: Sign provenance for the final installer
+        id: provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
+        with:
+          subject-path: downloads/Kobci-Construction-ERP-Windows-x64-Preview-2.exe
+      - name: Publish tested files and corresponding source
+        shell: bash
+        working-directory: downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: kobci-windows-preview-2
+          BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          cp "$BUNDLE" Kobci-installer.sigstore.json
+          sha256sum *.exe *.zip > SHA256SUMS.txt
+          gh attestation verify Kobci-Construction-ERP-Windows-x64-Preview-2.exe --repo "$GITHUB_REPOSITORY" --bundle Kobci-installer.sigstore.json
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
             --prerelease --latest=false --title "Kobci Construction ERP — Windows desktop preview 2" \
-            --notes-file ../desktop/kobci-windows/README.md \
-            Kobci-Construction-ERP-Windows-x64-Preview-2.exe Kobci-ERP-web-ui.zip SHA256SUMS.txt
+            --notes-file ../release-notes.md \
+            Kobci-Construction-ERP-Windows-x64-Preview-2.exe Kobci-ERP-web-ui.zip SHA256SUMS.txt Kobci-installer.sigstore.json

@@ -29,14 +29,14 @@ Section "Install"
   StrCmp $0 "" 0 webview_ready
   InitPluginsDir
   SetOutPath "$PLUGINSDIR"
-  File "MicrosoftEdgeWebview2Setup.exe"
+  File "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
   DetailPrint "Installing Microsoft Edge WebView2 Runtime"
   ClearErrors
-  ExecWait '"$PLUGINSDIR\MicrosoftEdgeWebview2Setup.exe" /silent /install' $1
+  ExecWait '"$PLUGINSDIR\MicrosoftEdgeWebView2RuntimeInstallerX64.exe" /silent /install' $1
   IfErrors webview_missing
   IntCmp $1 0 webview_ready webview_missing webview_missing
 webview_missing:
-  MessageBox MB_OK|MB_ICONEXCLAMATION "Kobci needs Microsoft Edge WebView2 Runtime. Connect to the internet or install the runtime from Microsoft, then run Setup again." /SD IDOK
+  MessageBox MB_OK|MB_ICONEXCLAMATION "Kobci needs Microsoft Edge WebView2 Runtime. The bundled runtime could not be installed. See the setup details, then retry." /SD IDOK
   SetErrorLevel 1
   Abort
 webview_ready:

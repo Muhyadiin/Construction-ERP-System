@@ -24,11 +24,12 @@ try {
     Remove-Item Env:TAURI_CONFIG -ErrorAction SilentlyContinue
 }
 
-# Microsoft redistributes this evergreen bootstrapper for application installers.
+# Package the evergreen x64 standalone runtime so installation also works offline.
 # Setup invokes it only on Windows installations without a WebView2 runtime.
-$runtime = "$PSScriptRoot/MicrosoftEdgeWebview2Setup.exe"
-Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $runtime
+$runtime = "$PSScriptRoot/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+Invoke-WebRequest 'https://go.microsoft.com/fwlink/?linkid=2124701' -OutFile $runtime
 $signature = Get-AuthenticodeSignature -LiteralPath $runtime
 if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '(?:^|, )O=Microsoft Corporation(?:,|$)') {
-    throw 'Microsoft WebView2 bootstrapper publisher verification failed'
+    throw 'Microsoft WebView2 runtime publisher verification failed'
 }
+if ((Get-Item $runtime).Length -lt 80MB) { throw 'Expected the full x64 offline WebView2 runtime' }
