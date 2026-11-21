@@ -24,11 +24,14 @@ $server = Join-Path $install 'server/openconstructionerp-server.exe'
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9338 --remote-debugging-address=127.0.0.1'
 
 function Inspect-Window($mode) {
-    Start-Process -FilePath $link
+    # Shell-opening a .lnk can delegate to Explorer, whose environment does
+    # not contain the runner-only WebView inspection settings. Execute the
+    # shortcut's verified target and working directory with this environment.
+    $launched = Start-Process -FilePath $shortcut.TargetPath -WorkingDirectory $shortcut.WorkingDirectory -PassThru
     try {
         node "$PSScriptRoot/check-window.mjs" $mode
         if ($LASTEXITCODE) { throw "The $mode desktop window did not pass" }
-        $app = Get-Process -Name Kobci -ErrorAction Stop | Select-Object -First 1
+        $app = Get-Process -Id $launched.Id -ErrorAction Stop
         if ($app.MainWindowHandle -eq 0) { throw 'Missing native app window' }
         if ($mode -eq 'success') {
             $health = Invoke-RestMethod 'http://127.0.0.1:8765/api/health' -TimeoutSec 10

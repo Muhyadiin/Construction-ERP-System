@@ -24,7 +24,28 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Reuse the exact installer when only its acceptance harness changed
+        id: reuse
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE: 5efd2ff416230251dc3d3b1f9c2cc0073aa9b5a2
+          ARCHIVE_SHA256: 25115b16766500abe4f78ec671459535a471c2a8698679c90deb129450d4ae0f
+        run: |
+          set -euo pipefail
+          if ! git diff --quiet "$SOURCE" "$GITHUB_SHA" -- . ':(exclude)desktop/kobci-windows/check-window.mjs' ':(exclude)desktop/kobci-windows/check-install.ps1' ':(exclude).github/workflows/kobci-windows-preview.yml'; then exit 0; fi
+          if ! meta=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/14705271532"); then exit 0; fi
+          if ! jq -e --arg sha "$SOURCE" --arg digest "sha256:$ARCHIVE_SHA256" '.expired == false and .name == "kobci-windows-candidate" and .workflow_run.id == 44898291406 and .workflow_run.head_sha == $sha and .digest == $digest' <<< "$meta"; then exit 0; fi
+          archive="$RUNNER_TEMP/verified-candidate.zip"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/14705271532/zip" > "$archive"
+          echo "$ARCHIVE_SHA256  $archive" | sha256sum -c -
+          cd desktop/kobci-windows
+          mkdir release-files
+          unzip -q "$archive" -d release-files
+          (cd release-files && sha256sum -c SHA256SUMS.txt)
+          echo 'used=true' >> "$GITHUB_OUTPUT"
       - name: Fetch the tested server from the build before CAD converters were bundled
+        if: steps.reuse.outputs.used != 'true'
         working-directory: desktop/kobci-windows
         shell: bash
         env:
@@ -38,9 +59,11 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/14614632426/zip" > sidecar.zip
           python prepare.py
       - name: Build the native Kobci window and verify the Microsoft offline WebView2 runtime
+        if: steps.reuse.outputs.used != 'true'
         shell: pwsh
         run: ./desktop/kobci-windows/build-desktop.ps1
       - name: Build the per-user installer
+        if: steps.reuse.outputs.used != 'true'
         working-directory: desktop/kobci-windows
         shell: pwsh
         run: |
@@ -52,6 +75,7 @@ jobs:
           & $compiler /V2 installer.nsi
           if ($LASTEXITCODE) { throw 'NSIS failed' }
       - name: Prepare downloads for acceptance testing
+        if: steps.reuse.outputs.used != 'true'
         working-directory: desktop/kobci-windows
         shell: bash
         run: |

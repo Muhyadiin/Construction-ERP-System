@@ -29,6 +29,7 @@ async function displayed(target) {
 }
 
 let lastTargets = [];
+let lastError = '';
 while (Date.now() < until) {
   try {
     const res = await fetch('http://127.0.0.1:9338/json/list', { signal: AbortSignal.timeout(3000) });
@@ -41,7 +42,7 @@ while (Date.now() < until) {
         process.exit(0);
       }
     }
-  } catch { /* The native WebView may still be starting or navigating. */ }
+  } catch (error) { lastError = String(error.cause?.code || error.name); }
   await delay(1500);
 }
-throw Error('Window did not reach the expected state. Last visible targets: ' + lastTargets.join(', '));
+throw Error('Window did not reach the expected state. Last visible targets: ' + lastTargets.join(', ') + ' (' + lastError + ')');
