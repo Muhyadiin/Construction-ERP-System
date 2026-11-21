@@ -33,7 +33,7 @@ jobs:
           ARCHIVE_SHA256: 25115b16766500abe4f78ec671459535a471c2a8698679c90deb129450d4ae0f
         run: |
           set -euo pipefail
-          if ! git diff --quiet "$SOURCE" "$GITHUB_SHA" -- . ':(exclude)desktop/kobci-windows/check-window.mjs' ':(exclude)desktop/kobci-windows/check-install.ps1' ':(exclude).github/workflows/kobci-windows-preview.yml'; then exit 0; fi
+          if ! git diff --quiet "$SOURCE" "$GITHUB_SHA" -- . ':(exclude)desktop/kobci-windows/check-window.mjs' ':(exclude)desktop/kobci-windows/check-window.ps1' ':(exclude)desktop/kobci-windows/check-install.ps1' ':(exclude).github/workflows/kobci-windows-preview.yml'; then exit 0; fi
           if ! meta=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/14705271532"); then exit 0; fi
           if ! jq -e --arg sha "$SOURCE" --arg digest "sha256:$ARCHIVE_SHA256" '.expired == false and .name == "kobci-windows-candidate" and .workflow_run.id == 44898291406 and .workflow_run.head_sha == $sha and .digest == $digest' <<< "$meta"; then exit 0; fi
           archive="$RUNNER_TEMP/verified-candidate.zip"

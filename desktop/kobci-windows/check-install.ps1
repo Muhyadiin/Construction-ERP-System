@@ -21,7 +21,7 @@ $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Get-Item $link
 $install = (Get-Item "$env:LOCALAPPDATA/Programs/Kobci Construction ERP").FullName
 if ($shortcut.TargetPath -ne (Join-Path $install 'Kobci.exe') -or $shortcut.WorkingDirectory -ne $data -or $shortcut.Arguments) { throw 'Desktop shortcut is incorrect' }
 $server = Join-Path $install 'server/openconstructionerp-server.exe'
-$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9338 --remote-debugging-address=127.0.0.1'
+$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--force-renderer-accessibility'
 
 function Inspect-Window($mode) {
     # Shell-opening a .lnk can delegate to Explorer, whose environment does
@@ -29,7 +29,7 @@ function Inspect-Window($mode) {
     # shortcut's verified target and working directory with this environment.
     $launched = Start-Process -FilePath $shortcut.TargetPath -WorkingDirectory $shortcut.WorkingDirectory -PassThru
     try {
-        node "$PSScriptRoot/check-window.mjs" $mode
+        powershell.exe -NoProfile -STA -File "$PSScriptRoot/check-window.ps1" -AppProcessId $launched.Id -Mode $mode
         if ($LASTEXITCODE) { throw "The $mode desktop window did not pass" }
         $app = Get-Process -Id $launched.Id -ErrorAction Stop
         if ($app.MainWindowHandle -eq 0) { throw 'Missing native app window' }
